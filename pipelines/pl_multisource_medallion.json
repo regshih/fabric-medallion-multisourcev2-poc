@@ -1,0 +1,343 @@
+{
+  "properties": {
+    "parameters": {
+      "run_date": { "type": "string", "defaultValue": "" }
+    },
+    "activities": [
+      {
+        "name": "ValidateDatabricks",
+        "type": "TridentNotebook",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "notebookId": "{{NOTEBOOK_ID:source_validation}}",
+          "workspaceId": "{{WORKSPACE_ID}}",
+          "parameters": {
+            "run_id": { "value": "@pipeline().RunId", "type": "string" },
+            "run_date": { "value": "@pipeline().parameters.run_date", "type": "string" },
+            "source": { "value": "databricks", "type": "string" }
+          }
+        }
+      },
+      {
+        "name": "LogValidateDatabricksFailure",
+        "type": "TridentNotebook",
+        "dependsOn": [
+          { "activity": "ValidateDatabricks", "dependencyConditions": ["Failed"] }
+        ],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "notebookId": "{{NOTEBOOK_ID:pipeline_log}}",
+          "workspaceId": "{{WORKSPACE_ID}}",
+          "parameters": {
+            "run_id": { "value": "@pipeline().RunId", "type": "string" },
+            "stage": { "value": "ValidateDatabricks", "type": "string" },
+            "status": { "value": "Failed", "type": "string" },
+            "start_ts": { "value": "@utcNow()", "type": "string" },
+            "end_ts": { "value": "@utcNow()", "type": "string" },
+            "rows_read": { "value": "0", "type": "string" },
+            "rows_written": { "value": "0", "type": "string" },
+            "error_message": { "value": "@activity('ValidateDatabricks').Error.message", "type": "string" },
+            "run_date": { "value": "@pipeline().parameters.run_date", "type": "string" }
+          }
+        }
+      },
+      {
+        "name": "ValidateCosmos",
+        "type": "TridentNotebook",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "notebookId": "{{NOTEBOOK_ID:source_validation}}",
+          "workspaceId": "{{WORKSPACE_ID}}",
+          "parameters": {
+            "run_id": { "value": "@pipeline().RunId", "type": "string" },
+            "run_date": { "value": "@pipeline().parameters.run_date", "type": "string" },
+            "source": { "value": "cosmos", "type": "string" }
+          }
+        }
+      },
+      {
+        "name": "LogValidateCosmosFailure",
+        "type": "TridentNotebook",
+        "dependsOn": [
+          { "activity": "ValidateCosmos", "dependencyConditions": ["Failed"] }
+        ],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "notebookId": "{{NOTEBOOK_ID:pipeline_log}}",
+          "workspaceId": "{{WORKSPACE_ID}}",
+          "parameters": {
+            "run_id": { "value": "@pipeline().RunId", "type": "string" },
+            "stage": { "value": "ValidateCosmos", "type": "string" },
+            "status": { "value": "Failed", "type": "string" },
+            "start_ts": { "value": "@utcNow()", "type": "string" },
+            "end_ts": { "value": "@utcNow()", "type": "string" },
+            "rows_read": { "value": "0", "type": "string" },
+            "rows_written": { "value": "0", "type": "string" },
+            "error_message": { "value": "@activity('ValidateCosmos').Error.message", "type": "string" },
+            "run_date": { "value": "@pipeline().parameters.run_date", "type": "string" }
+          }
+        }
+      },
+      {
+        "name": "SilverTransform",
+        "type": "TridentNotebook",
+        "dependsOn": [
+          { "activity": "ValidateDatabricks", "dependencyConditions": ["Succeeded"] },
+          { "activity": "ValidateCosmos", "dependencyConditions": ["Succeeded"] }
+        ],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "notebookId": "{{NOTEBOOK_ID:silver_transform}}",
+          "workspaceId": "{{WORKSPACE_ID}}",
+          "parameters": {
+            "run_id": { "value": "@pipeline().RunId", "type": "string" },
+            "run_date": { "value": "@pipeline().parameters.run_date", "type": "string" }
+          }
+        }
+      },
+      {
+        "name": "LogSilverTransformFailure",
+        "type": "TridentNotebook",
+        "dependsOn": [
+          { "activity": "SilverTransform", "dependencyConditions": ["Failed"] }
+        ],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "notebookId": "{{NOTEBOOK_ID:pipeline_log}}",
+          "workspaceId": "{{WORKSPACE_ID}}",
+          "parameters": {
+            "run_id": { "value": "@pipeline().RunId", "type": "string" },
+            "stage": { "value": "SilverTransform", "type": "string" },
+            "status": { "value": "Failed", "type": "string" },
+            "start_ts": { "value": "@utcNow()", "type": "string" },
+            "end_ts": { "value": "@utcNow()", "type": "string" },
+            "rows_read": { "value": "0", "type": "string" },
+            "rows_written": { "value": "0", "type": "string" },
+            "error_message": { "value": "@activity('SilverTransform').Error.message", "type": "string" },
+            "run_date": { "value": "@pipeline().parameters.run_date", "type": "string" }
+          }
+        }
+      },
+      {
+        "name": "GoldBuild",
+        "type": "TridentNotebook",
+        "dependsOn": [
+          { "activity": "SilverTransform", "dependencyConditions": ["Succeeded"] }
+        ],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "notebookId": "{{NOTEBOOK_ID:gold_build}}",
+          "workspaceId": "{{WORKSPACE_ID}}",
+          "parameters": {
+            "run_id": { "value": "@pipeline().RunId", "type": "string" },
+            "run_date": { "value": "@pipeline().parameters.run_date", "type": "string" }
+          }
+        }
+      },
+      {
+        "name": "LogGoldBuildFailure",
+        "type": "TridentNotebook",
+        "dependsOn": [
+          { "activity": "GoldBuild", "dependencyConditions": ["Failed"] }
+        ],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "notebookId": "{{NOTEBOOK_ID:pipeline_log}}",
+          "workspaceId": "{{WORKSPACE_ID}}",
+          "parameters": {
+            "run_id": { "value": "@pipeline().RunId", "type": "string" },
+            "stage": { "value": "GoldBuild", "type": "string" },
+            "status": { "value": "Failed", "type": "string" },
+            "start_ts": { "value": "@utcNow()", "type": "string" },
+            "end_ts": { "value": "@utcNow()", "type": "string" },
+            "rows_read": { "value": "0", "type": "string" },
+            "rows_written": { "value": "0", "type": "string" },
+            "error_message": { "value": "@activity('GoldBuild').Error.message", "type": "string" },
+            "run_date": { "value": "@pipeline().parameters.run_date", "type": "string" }
+          }
+        }
+      },
+      {
+        "name": "WarehousePublish",
+        "type": "TridentNotebook",
+        "dependsOn": [
+          { "activity": "GoldBuild", "dependencyConditions": ["Succeeded"] }
+        ],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "notebookId": "{{NOTEBOOK_ID:warehouse_publish}}",
+          "workspaceId": "{{WORKSPACE_ID}}",
+          "parameters": {
+            "run_id": { "value": "@pipeline().RunId", "type": "string" },
+            "run_date": { "value": "@pipeline().parameters.run_date", "type": "string" }
+          }
+        }
+      },
+      {
+        "name": "LogWarehousePublishFailure",
+        "type": "TridentNotebook",
+        "dependsOn": [
+          { "activity": "WarehousePublish", "dependencyConditions": ["Failed"] }
+        ],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "notebookId": "{{NOTEBOOK_ID:pipeline_log}}",
+          "workspaceId": "{{WORKSPACE_ID}}",
+          "parameters": {
+            "run_id": { "value": "@pipeline().RunId", "type": "string" },
+            "stage": { "value": "WarehousePublish", "type": "string" },
+            "status": { "value": "Failed", "type": "string" },
+            "start_ts": { "value": "@utcNow()", "type": "string" },
+            "end_ts": { "value": "@utcNow()", "type": "string" },
+            "rows_read": { "value": "0", "type": "string" },
+            "rows_written": { "value": "0", "type": "string" },
+            "error_message": { "value": "@activity('WarehousePublish').Error.message", "type": "string" },
+            "run_date": { "value": "@pipeline().parameters.run_date", "type": "string" }
+          }
+        }
+      },
+      {
+        "name": "Reconciliation",
+        "type": "TridentNotebook",
+        "dependsOn": [
+          { "activity": "WarehousePublish", "dependencyConditions": ["Succeeded"] }
+        ],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "notebookId": "{{NOTEBOOK_ID:reconciliation}}",
+          "workspaceId": "{{WORKSPACE_ID}}",
+          "parameters": {
+            "run_id": { "value": "@pipeline().RunId", "type": "string" },
+            "run_date": { "value": "@pipeline().parameters.run_date", "type": "string" }
+          }
+        }
+      },
+      {
+        "name": "LogReconciliationFailure",
+        "type": "TridentNotebook",
+        "dependsOn": [
+          { "activity": "Reconciliation", "dependencyConditions": ["Failed"] }
+        ],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "notebookId": "{{NOTEBOOK_ID:pipeline_log}}",
+          "workspaceId": "{{WORKSPACE_ID}}",
+          "parameters": {
+            "run_id": { "value": "@pipeline().RunId", "type": "string" },
+            "stage": { "value": "Reconciliation", "type": "string" },
+            "status": { "value": "Failed", "type": "string" },
+            "start_ts": { "value": "@utcNow()", "type": "string" },
+            "end_ts": { "value": "@utcNow()", "type": "string" },
+            "rows_read": { "value": "0", "type": "string" },
+            "rows_written": { "value": "0", "type": "string" },
+            "error_message": { "value": "@activity('Reconciliation').Error.message", "type": "string" },
+            "run_date": { "value": "@pipeline().parameters.run_date", "type": "string" }
+          }
+        }
+      },
+      {
+        "name": "CompletionLogging",
+        "type": "TridentNotebook",
+        "dependsOn": [
+          { "activity": "Reconciliation", "dependencyConditions": ["Succeeded"] }
+        ],
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "typeProperties": {
+          "notebookId": "{{NOTEBOOK_ID:pipeline_log}}",
+          "workspaceId": "{{WORKSPACE_ID}}",
+          "parameters": {
+            "run_id": { "value": "@pipeline().RunId", "type": "string" },
+            "stage": { "value": "PipelineComplete", "type": "string" },
+            "status": { "value": "Succeeded", "type": "string" },
+            "start_ts": { "value": "@utcNow()", "type": "string" },
+            "end_ts": { "value": "@utcNow()", "type": "string" },
+            "rows_read": { "value": "0", "type": "string" },
+            "rows_written": { "value": "0", "type": "string" },
+            "error_message": { "value": "", "type": "string" },
+            "run_date": { "value": "@pipeline().parameters.run_date", "type": "string" }
+          }
+        }
+      }
+    ]
+  }
+}
