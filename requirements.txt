@@ -1,0 +1,11 @@
+azure-identity
+azure-mgmt-databricks
+azure-cosmos
+requests
+pandas
+numpy
+pyarrow
+Faker
+python-dotenv
+pytest
+databricks-sdk
