@@ -40,7 +40,7 @@ As of 2026-09-01:
 | OneLake security (column-level constraints) | **Applied and verified stored**: `DimCustomer.CustomerID` and `DimDevice.DeviceFingerprint` restricted on the `DefaultReader` role. Fabric's column-level security only supports `columnEffect: "Permit"` — a `"Deny"` constraint (the original design) is rejected outright (`PolicyValidationError`, confirmed live); redesigned as an allow-list naming every other column instead. Enforcement against a genuinely lesser-privileged principal still not independently verified (see docs/known-limitations.md). |
 | Warehouse governance (masking, RLS) | **Executed**: `00_refresh_gold_serving.sql` → `10_apply_security.sql` → `20_validate_security.sql` all ran successfully against `gold_wh` against real Gold data (no longer blocked on empty tables). |
 | Fabric Git integration | **Deployed and verified**: connection `fabric-medallion-multisourcev2-poc-git-sync` created with a human-provided fine-grained GitHub PAT (`gh auth token`'s OAuth token was rejected — see [docs/known-limitations.md](docs/known-limitations.md)), workspace connected to `regshih/fabric-medallion-multisourcev2-poc` (`fabric_git` state `ConnectedAndInitialized`). Fabric pushed a real commit (`d746e60`, "Sync via infra/setup_git_integration.py") serializing all 12 workspace items into `fabric_git/` — confirmed live by pulling it locally. |
-| Public repository security review | Not yet performed — repo is **private** until it passes |
+| Public repository security review | **Performed and passed**: full secret scan over the entire git history and working tree — see [docs/security-review.md](docs/security-review.md). One finding (a non-credential subscription ID in an example docstring), fixed. Repo visibility itself is a separate decision — as of this writing, still **private**. |
 
 This table is maintained honestly as work progresses — see the git history for how each row
 was resolved, and [docs/known-limitations.md](docs/known-limitations.md) for anything that
@@ -106,3 +106,4 @@ and cleanup/cost guidance.
 - [Deployment guide](docs/deployment.md)
 - [Operations runbook](docs/runbook.md)
 - [Known limitations](docs/known-limitations.md)
+- [Public-repository security review](docs/security-review.md)

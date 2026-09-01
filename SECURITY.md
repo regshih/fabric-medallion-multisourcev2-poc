@@ -51,10 +51,11 @@ glossed over:
   hostnames, resource IDs, catalog/schema/database names. None of these values grant access
   on their own; they're meaningless without the Azure AD identity that authenticates against
   them.
-- Before this repository is made public, a full secret scan is run over the working tree
-  **and git history** — see [docs/security-review.md](docs/security-review.md) once that
-  review has actually been performed. The repository stays **private** until that review
-  passes.
+- A full secret scan over the working tree **and git history** is a prerequisite before this
+  repository goes public — see [docs/security-review.md](docs/security-review.md) for the
+  review actually performed (2026-09-01): one finding (a non-credential subscription ID in an
+  example, fixed), otherwise clean. Passing this review is necessary but not sufficient on its
+  own — visibility is a separate, deliberate decision the repository owner makes.
 
 ## Networking
 
