@@ -33,8 +33,8 @@ As of 2026-09-01:
 | Cosmos synthetic data (sessions, devices, fraud alerts) | Executed and **verified**: 1,201 digitalSessions / 400 devices / 151 fraudAlerts live, correct partition keys, deliberate schema variation confirmed present (`validation/validate_cosmos.py`) |
 | Fabric workspace, `silver_lh`/`gold_lh`/`gold_wh` items | Deployed |
 | Fabric notebooks (7) and `pl_multisource_medallion` pipeline | Deployed to the workspace |
-| Mirrored Azure Databricks catalog (Bronze, Databricks side) | See task report — in progress at the time of this writing |
-| Mirrored Azure Cosmos DB database (Bronze, Cosmos side) | See task report — this one has a real, documented product-level networking blocker (Fabric virtual network data gateway) that may not be fully resolvable from this environment; see [docs/cosmos-fabric-mirroring.md](docs/cosmos-fabric-mirroring.md) |
+| Mirrored Azure Databricks catalog (Bronze, Databricks side) | **Deployed, executed, verified**: item `fmv2poc_databricks_banking_mirror`, `mirrorStatus: "Mirrored"`, all 3 OneLake shortcuts confirmed reachable via a direct ADLS Gen2 API check |
+| Mirrored Azure Cosmos DB database (Bronze, Cosmos side) | Networking fully done (VNet gateway + Network ACL Bypass, all 8 steps of Microsoft's private-network guide except one, all verified live). **Blocked, human-only** on step 7: Fabric's Cosmos DB v2 connection over a virtual-network gateway only supports interactive OAuth 2.0 sign-in in the Fabric portal — confirmed via a hard `400 OAuth2CredentialsNotSupportedForConnection` REST rejection, not inferred from docs. See [docs/cosmos-fabric-mirroring.md](docs/cosmos-fabric-mirroring.md) for the exact portal steps; re-run `python -m infra.fabric.mirror_cosmos` afterward to finish unattended. |
 | Pipeline execution (Silver/Gold/Warehouse/reconciliation) | Not yet executed — depends on both mirrors being readable |
 | OneLake Catalog (item descriptions, domain assignment) | **Verified**: all 13 items described, workspace assigned to the `Retail Banking Analytics` domain, confirmed discoverable via Catalog Search |
 | OneLake security (column-level constraints) | Implemented, not yet applied |
@@ -87,9 +87,17 @@ and cleanup/cost guidance.
 - Confirm the `fabricmsv2poc915d` capacity (F2, West US 3, resource group
   `rg-fabric-medallion-multisourcev2-poc-westus3`) is Active before running provisioning or
   deploy scripts — Fabric trial/dev capacities can auto-pause between sessions.
-- If Cosmos DB mirroring's virtual-network-gateway step turns out to require genuinely
-  interactive/portal-only action (see [docs/cosmos-fabric-mirroring.md](docs/cosmos-fabric-mirroring.md)
-  for the exact state), that step needs a human in the Fabric portal.
+- **Cosmos DB mirroring's Azure Cosmos DB v2 connection**: confirmed portal-only (Fabric's
+  REST API hard-rejects OAuth2 credentials for a `VirtualNetworkGateway` connection —
+  `400 OAuth2CredentialsNotSupportedForConnection`). All networking prerequisites (VNet
+  gateway, NAT gateway, Network ACL Bypass) are already done and verified. In the Fabric
+  portal: **Settings → Manage connections and gateways → Connections → + New → connectivity
+  type "Virtual network" → gateway `fmv2poc-cosmos-vnet-gateway` → connection type "Azure
+  Cosmos DB v2" → endpoint `https://cosmosfabricmsv2915d.documents.azure.com:443/` →
+  Authentication method "OAuth 2.0" → sign in.** Then run
+  `python -m infra.fabric.mirror_cosmos` to finish (mirrored database item + start
+  mirroring) unattended. See [docs/cosmos-fabric-mirroring.md](docs/cosmos-fabric-mirroring.md)
+  for the full trace.
 - Build the Power BI Direct Lake report (out of scope for this POC's automation, same as the
   sibling reference POCs).
 

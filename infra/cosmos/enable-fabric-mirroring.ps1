@@ -4,9 +4,13 @@ Authorizes a Fabric workspace to reach this private-endpoint-only Cosmos DB acco
 Network ACL Bypass, for private-network Fabric mirroring.
 
 .DESCRIPTION
-NOT YET RUN as of this writing — it requires a Fabric workspace ID, and no Fabric
-workspace exists for this POC yet (workspace creation is out of the Cosmos specialist's
-scope; see infra/fabric/provision.py). Run this once that workspace exists.
+As of 2026-09-01, steps 3-5 below are DONE and verified live against the real account
+(applied directly via equivalent `az cosmosdb` calls rather than this script, since a
+PowerShell/Az-module session wasn't available in that context — see
+docs/cosmos-fabric-mirroring.md for the exact commands and verification). This script is
+kept, idempotent, and safe to re-run (e.g. against a rebuilt account, or by a human with
+an interactive `Connect-AzAccount` session) — it will detect the existing role/capability/
+bypass-authorization and skip re-applying them.
 
 Implements steps 3-5 of Microsoft's documented private-network mirroring setup
 (https://learn.microsoft.com/en-us/fabric/mirroring/azure-cosmos-db-private-network):

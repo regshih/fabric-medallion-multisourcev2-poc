@@ -14,12 +14,26 @@ generator are fabricated strings, never real individual-associated network data.
 ## Authentication
 
 No passwords, API keys, connection strings, or account keys are used anywhere in this
-repository's code:
+repository's **code** — every credential-bearing value below is generated at runtime and
+never written to a file this repo tracks. One exception is documented honestly rather than
+glossed over:
 
 - **Azure/Fabric**: `DefaultAzureCredential` (developer `az login`) throughout — every
   `infra/` script.
-- **Azure Databricks**: `databricks-sdk`'s `azure-cli` auth type, exchanging the Azure AD
-  token for a Databricks token. No Databricks PATs.
+- **Azure Databricks (local tooling)**: `databricks-sdk`'s `azure-cli` auth type, exchanging
+  the Azure AD token for a Databricks token. No Databricks PATs for any of the seed/
+  incremental/validation scripts.
+- **Azure Databricks (Fabric mirroring connection only)**: Fabric's mirrored-catalog
+  connection needs one of Organizational-account (interactive browser OAuth — confirmed live
+  not completable unattended), Service Principal (blocked by this environment's own
+  credential-minting safety controls), or a Databricks personal access token. A PAT was the
+  only viable unattended path, so `infra/fabric/mirror_databricks.py` mints one
+  (`ws.tokens.create(..., lifetime_seconds=90*24*60*60)` — bounded 90-day expiry, not
+  indefinite) and passes it directly into the Fabric connection's `credentialDetails` over
+  HTTPS; it is never printed, logged, or written to any file. Fabric stores it encrypted
+  inside the Connection object, outside this repo's control — the same trust boundary as the
+  human-provided GitHub PAT below. See `infra/fabric/mirror_databricks.py`'s docstring for
+  the full live-confirmed reasoning.
 - **Azure Cosmos DB**: the account has `disableLocalAuth: true` — account keys are disabled
   at the resource level, not just avoided by convention. All access (loaders, validation, and
   the eventual Fabric mirroring connection) uses Microsoft Entra ID with Cosmos DB's built-in

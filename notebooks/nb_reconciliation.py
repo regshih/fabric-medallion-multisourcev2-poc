@@ -61,9 +61,16 @@ _start_ts = datetime.now(timezone.utc)
 if not run_date:
     run_date = _start_ts.strftime("%Y-%m-%d")
 
-DATABRICKS_MIRROR_ITEM_NAME = "PLACEHOLDER_databricks_mirror_item_name"  # TODO fill in (kept in sync with nb_source_validation.py / nb_silver_transform.py)
+# Real Fabric display name, confirmed live 2026-09-01 by infra/fabric/mirror_databricks.py.
+# Kept in sync with nb_source_validation.py / nb_silver_transform.py.
+DATABRICKS_MIRROR_ITEM_NAME = "fmv2poc_databricks_banking_mirror"
 DATABRICKS_SCHEMA = "banking"
-COSMOS_MIRROR_ITEM_NAME = "PLACEHOLDER_cosmos_mirror_item_name"  # TODO fill in
+# Still blocked as of 2026-09-01 -- see docs/cosmos-fabric-mirroring.md "What's not done,
+# and exactly why" and infra/fabric/mirror_cosmos.py's docstring for the one remaining
+# manual step (portal-only OAuth sign-in for the Cosmos DB v2 connection -- all networking
+# prerequisites are already done and verified). Deliberately BLOCKED-prefixed so the loop
+# below annotates its FAIL rows with why, instead of looking like a real mismatch.
+COSMOS_MIRROR_ITEM_NAME = "BLOCKED_no_cosmos_mirror_see_docs"
 
 WORKSPACE_ID = "7e206237-aef1-4932-9f94-1f6ae343407a"
 SILVER_LH_ID = "6575b89d-6ea5-4273-9b7a-8c9dc67ef2c0"
@@ -126,12 +133,18 @@ for mirror_table, silver_valid, silver_quarantine in COSMOS_CHECKS:
     src_count = mirror_count(fq)
     fabric_count = silver_table(silver_valid).count() + silver_table(silver_quarantine).count()
     status = "PASS" if (src_count is not None and src_count == fabric_count) else "FAIL"
-    add_row(
-        "cosmos", mirror_table, src_count, fabric_count, "row_count", status,
+    notes = (
         "Validates a genuinely replicated target snapshot (Cosmos mirroring physically "
         "copies documents into Delta) — unlike the Databricks checks above. fabric_count = "
-        "Silver valid + Silver quarantine.",
+        "Silver valid + Silver quarantine."
     )
+    if COSMOS_MIRROR_ITEM_NAME.startswith("BLOCKED_"):
+        notes = (
+            "EXPECTED FAIL: the Cosmos mirror does not exist yet (blocked on a portal-only "
+            "OAuth sign-in for the Cosmos DB v2 connection -- all networking prerequisites "
+            "are done; see docs/cosmos-fabric-mirroring.md). Not a real reconciliation mismatch."
+        )
+    add_row("cosmos", mirror_table, src_count, fabric_count, "row_count", status, notes)
 
 # CELL ********************
 

@@ -62,12 +62,21 @@ if source not in ("databricks", "cosmos"):
     raise ValueError(f"source must be 'databricks' or 'cosmos', got {source!r}")
 
 # --- Databricks (Unity Catalog, per ARCHITECTURE.md) ---
-DATABRICKS_MIRROR_ITEM_NAME = "PLACEHOLDER_databricks_mirror_item_name"  # TODO fill in
+# Real Fabric display name, confirmed live 2026-09-01 by infra/fabric/mirror_databricks.py.
+DATABRICKS_MIRROR_ITEM_NAME = "fmv2poc_databricks_banking_mirror"
 DATABRICKS_SCHEMA = "banking"
 DATABRICKS_TABLES = ["transactions", "transaction_risk_scores", "merchants"]
 
 # --- Cosmos DB (per ARCHITECTURE.md) ---
-COSMOS_MIRROR_ITEM_NAME = "PLACEHOLDER_cosmos_mirror_item_name"  # TODO fill in
+# Still blocked as of 2026-09-01 -- see docs/cosmos-fabric-mirroring.md "What's not done,
+# and exactly why" and infra/fabric/mirror_cosmos.py's docstring. The gateway is deployed
+# and all Cosmos-side networking prerequisites (RBAC role, Network ACL Bypass, NAT gateway)
+# are done and verified, but the Cosmos DB v2 connection through the gateway requires a
+# one-time interactive OAuth sign-in in the Fabric portal (confirmed live: the REST API
+# rejects OAuth2 credentials for VirtualNetworkGateway connections outright). Deliberately
+# BLOCKED-prefixed, not PLACEHOLDER-prefixed, so validate_cosmos() below fails with a clear,
+# specific message instead of a generic Spark AnalysisException.
+COSMOS_MIRROR_ITEM_NAME = "BLOCKED_no_cosmos_mirror_see_docs"
 COSMOS_TABLES = ["digitalSessions", "devices", "fraudAlerts"]
 
 
@@ -94,6 +103,19 @@ def validate_databricks() -> dict[str, int]:
 
 
 def validate_cosmos() -> dict[str, int]:
+    if COSMOS_MIRROR_ITEM_NAME.startswith("BLOCKED_"):
+        raise RuntimeError(
+            "The Cosmos DB mirror does not exist yet: its Fabric connection requires a "
+            "one-time interactive OAuth sign-in in the Fabric portal that cannot be "
+            "scripted (confirmed live -- POSTing OAuth2 credentials for a "
+            "VirtualNetworkGateway connection returns 400 "
+            "OAuth2CredentialsNotSupportedForConnection). All networking prerequisites "
+            "(VNet gateway, NAT gateway, RBAC role, Network ACL Bypass) are already done "
+            "and verified. See docs/cosmos-fabric-mirroring.md 'What's not done, and "
+            "exactly why' for the exact remaining portal steps. Once done, update "
+            "COSMOS_MIRROR_ITEM_NAME here (and in nb_silver_transform.py / "
+            "nb_reconciliation.py) to the real mirror item name."
+        )
     counts = {}
     for table in COSMOS_TABLES:
         fq = f"`{COSMOS_MIRROR_ITEM_NAME}`.`{table}`"

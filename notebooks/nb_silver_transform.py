@@ -73,9 +73,21 @@ _start_ts = datetime.now(timezone.utc)
 if not run_date:
     run_date = _start_ts.strftime("%Y-%m-%d")
 
-DATABRICKS_MIRROR_ITEM_NAME = "PLACEHOLDER_databricks_mirror_item_name"  # TODO fill in
+# Real Fabric display name, confirmed live 2026-09-01 by infra/fabric/mirror_databricks.py
+# (Partial catalog mirroring, banking schema, Full mode -- sync status Success,
+# mirrorStatus Mirrored, all three table shortcuts verified present in OneLake).
+DATABRICKS_MIRROR_ITEM_NAME = "fmv2poc_databricks_banking_mirror"
 DATABRICKS_SCHEMA = "banking"
-COSMOS_MIRROR_ITEM_NAME = "PLACEHOLDER_cosmos_mirror_item_name"  # TODO fill in
+# Still blocked as of 2026-09-01 -- see docs/cosmos-fabric-mirroring.md "What's not done,
+# and exactly why". The Fabric virtual network data gateway (infra/fabric/mirror_cosmos.py)
+# is deployed, and all Cosmos-side networking prerequisites (RBAC role, Network ACL Bypass,
+# NAT gateway) are done and verified -- but the Cosmos DB v2 connection through the gateway
+# can only be created via the Fabric portal's interactive OAuth sign-in (confirmed live: the
+# REST API flatly rejects OAuth2 credentials for VirtualNetworkGateway connections with
+# OAuth2CredentialsNotSupportedForConnection). This placeholder is deliberately
+# BLOCKED-prefixed (not PLACEHOLDER-prefixed) so a stale value fails loudly and
+# unambiguously if this notebook is ever run before the mirror exists.
+COSMOS_MIRROR_ITEM_NAME = "BLOCKED_no_cosmos_mirror_see_docs"
 
 
 def mirror_databricks_table(table: str):
@@ -91,6 +103,16 @@ def mirror_databricks_table(table: str):
 
 
 def mirror_cosmos_table(table: str):
+    if COSMOS_MIRROR_ITEM_NAME.startswith("BLOCKED_"):
+        raise RuntimeError(
+            "The Cosmos DB mirror does not exist yet -- creating its Fabric connection "
+            "requires a one-time interactive OAuth sign-in in the Fabric portal that "
+            "cannot be scripted (confirmed live, not assumed). See "
+            "docs/cosmos-fabric-mirroring.md 'What's not done, and exactly why' for the "
+            "precise manual steps, then update COSMOS_MIRROR_ITEM_NAME here (and in "
+            "nb_source_validation.py / nb_reconciliation.py) to the real mirror item name "
+            "and re-run infra/fabric/mirror_cosmos.py to finish setup."
+        )
     fq = f"`{COSMOS_MIRROR_ITEM_NAME}`.`{table}`"
     try:
         return spark.table(fq)

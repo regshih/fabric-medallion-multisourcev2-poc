@@ -22,10 +22,17 @@
 //     the only thing standing between the account and the internet.
 //
 // Fabric's Network ACL Bypass authorization (EnableFabricNetworkAclBypass capability +
-// networkAclBypassResourceIds pointing at a Fabric workspace ID) is deliberately NOT
-// set here — no Fabric workspace exists yet for this POC to authorize. See
-// infra/cosmos/enable-fabric-mirroring.ps1, which applies it once a workspace ID is
-// available.
+// networkAclBypassResourceIds pointing at a Fabric workspace ID) is deliberately NOT set
+// in this template — it's an account-level security/networking mutation, applied
+// out-of-band via infra/cosmos/enable-fabric-mirroring.ps1 (or equivalent `az cosmosdb`
+// calls) instead of the plain `az deployment` path, so a template redeploy can't
+// accidentally clobber it. As of 2026-09-01 it IS applied and verified live against the
+// real account (capabilities includes EnableFabricNetworkAclBypass,
+// networkAclBypass=AzureServices, networkAclBypassResourceIds authorizes workspace
+// fabric-medallion-multisourcev2-poc / 7e206237-aef1-4932-9f94-1f6ae343407a) — this
+// template just doesn't own that particular setting, the same way it doesn't own the
+// EnableServerless capability's origin. See docs/cosmos-fabric-mirroring.md for the
+// current end-to-end mirroring status.
 
 @description('Globally unique Cosmos DB account name.')
 param accountName string
@@ -61,8 +68,37 @@ param runnerSubnetPrefix string = '10.60.3.0/28'
 @description('Plain (undelegated) subnet for a temporary bootstrap VM that runs the JSON document loaders (see infra/cosmos/run_loader.ps1). With publicNetworkAccess Disabled, this is the only way to run them at all. Costs nothing while no VM is deployed into it.')
 param runnerVmSubnetPrefix string = '10.60.4.0/28'
 
+@description('Whether to deploy a NAT gateway + static public IP and attach it to snet-fabric. This is REQUIRED, not optional, for the Fabric virtual network data gateway\'s own outbound OAuth sign-in to Microsoft Entra ID during Cosmos DB v2 connection setup (Azure retired default outbound internet access for new subnets after March 31, 2026 — see docs/cosmos-fabric-mirroring.md "Gateway OAuth invalid token error"). Defaults to true. snet-fabric had no NAT gateway until one was attached out-of-band on 2026-09-01 (az network nat gateway create + az network vnet subnet update, done directly since this template hadn\'t caught up yet); this parameter and the two resources below now capture that change so a future redeploy doesn\'t drift it away.')
+param deployFabricGatewayNat bool = true
+
 var cosmosDataContributorRoleId = '00000000-0000-0000-0000-000000000002'
 var privateDnsZoneName = 'privatelink.documents.azure.com'
+
+resource fabricNatPip 'Microsoft.Network/publicIPAddresses@2024-05-01' = if (deployFabricGatewayNat) {
+  name: 'pip-nat-fabric'
+  location: location
+  sku: {
+    name: 'Standard'
+  }
+  properties: {
+    publicIPAllocationMethod: 'Static'
+  }
+}
+
+resource fabricNatGateway 'Microsoft.Network/natGateways@2024-05-01' = if (deployFabricGatewayNat) {
+  name: 'nat-fabric'
+  location: location
+  sku: {
+    name: 'Standard'
+  }
+  properties: {
+    publicIpAddresses: [
+      {
+        id: fabricNatPip.id
+      }
+    ]
+  }
+}
 
 resource vnet 'Microsoft.Network/virtualNetworks@2024-05-01' = {
   name: '${accountName}-vnet'
@@ -92,6 +128,9 @@ resource vnet 'Microsoft.Network/virtualNetworks@2024-05-01' = {
             }
           ]
           privateEndpointNetworkPolicies: 'Disabled'
+          natGateway: deployFabricGatewayNat ? {
+            id: fabricNatGateway.id
+          } : null
         }
       }
       {
