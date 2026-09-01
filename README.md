@@ -39,7 +39,7 @@ As of 2026-09-01:
 | OneLake Catalog (item descriptions, domain assignment) | **Verified**: all 13 items described, workspace assigned to the `Retail Banking Analytics` domain, confirmed discoverable via Catalog Search |
 | OneLake security (column-level constraints) | Implemented, not yet applied |
 | Warehouse governance (masking, RLS) | Implemented, not yet executed (depends on Gold data existing) |
-| Fabric Git integration | **Blocked, human-only**: Fabric's GitHub connector requires a real classic/fine-grained GitHub PAT — `gh auth token`'s OAuth token is explicitly rejected ("Unexpected PAT detected"). See "Human-only steps" below. |
+| Fabric Git integration | **Deployed and verified**: connection `fabric-medallion-multisourcev2-poc-git-sync` created with a human-provided fine-grained GitHub PAT (`gh auth token`'s OAuth token was rejected — see [docs/known-limitations.md](docs/known-limitations.md)), workspace connected to `regshih/fabric-medallion-multisourcev2-poc` (`fabric_git` state `ConnectedAndInitialized`). Fabric pushed a real commit (`d746e60`, "Sync via infra/setup_git_integration.py") serializing all 12 workspace items into `fabric_git/` — confirmed live by pulling it locally. |
 | Public repository security review | Not yet performed — repo is **private** until it passes |
 
 This table is maintained honestly as work progresses — see the git history for how each row
@@ -90,11 +90,6 @@ and cleanup/cost guidance.
   `python -m infra.databricks.grant_external_use_schema --principal <app-id> ...`, and update
   the connection to a `ServicePrincipal` credential. No notebook code change needed either
   way — `src_databricks_*` Lakehouse shortcuts already exist and point at the right place.
-- **GitHub PAT for Fabric Git integration**: create a fine-grained PAT scoped to just this
-  repo (Contents: Read and write, short expiration) at
-  https://github.com/settings/personal-access-tokens/new, set it as `GITHUB_PAT` in `.env`
-  (never commit it), then run `python -m infra.setup_git_integration`. `gh auth token`'s
-  OAuth token does not work here — confirmed live, Fabric's connector explicitly rejects it.
 - Confirm the `fabricmsv2poc915d` capacity (F2, West US 3, resource group
   `rg-fabric-medallion-multisourcev2-poc-westus3`) is Active before running provisioning or
   deploy scripts — Fabric trial/dev capacities can auto-pause between sessions.

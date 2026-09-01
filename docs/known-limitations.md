@@ -2,8 +2,6 @@
 
 ## Current blockers (as of 2026-09-01 — see README's evidence table for current status)
 
-- Fabric Git integration needs a real GitHub PAT; `gh auth token`'s OAuth token is explicitly
-  rejected by Fabric's connector ("Unexpected PAT detected"). Human-only step, see README.
 - Cosmos DB mirroring for a private-endpoint-only account needs a Fabric virtual network data
   gateway on a reserved subnet — a real, documented product requirement, not a workaround
   avoided out of laziness. All networking is done and verified; only the portal-only OAuth

@@ -118,8 +118,14 @@ python -m infra.run_sql_file gold_wh warehouse/10_apply_security.sql
 python -m infra.run_sql_file gold_wh warehouse/20_validate_security.sql
 ```
 
-## 9. Git integration (human-only PAT step first — see README)
+## 9. Git integration
 
 ```bash
 python -m infra.setup_git_integration
 ```
+
+Needs a human-provided fine-grained GitHub PAT (`Contents: Read and write`, scoped to this
+repo) as `GITHUB_PAT` in `.env` first — `gh auth token`'s OAuth token is rejected by Fabric's
+connector. Done for this POC: connection `fabric-medallion-multisourcev2-poc-git-sync`,
+workspace synced to `regshih/fabric-medallion-multisourcev2-poc` (state
+`ConnectedAndInitialized`), all 12 items serialized under `fabric_git/`.
