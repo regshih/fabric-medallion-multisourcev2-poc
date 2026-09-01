@@ -187,6 +187,15 @@ def generate_risk_scores(fake: Faker, transactions: pd.DataFrame) -> pd.DataFram
 
 def write_parquet(df: pd.DataFrame, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    # pandas Timestamp columns default to nanosecond precision, which pyarrow
+    # writes as Parquet's INT64 TIMESTAMP(NANOS) — Spark's Parquet reader
+    # rejects that outright (PARQUET_TYPE_ILLEGAL), it only reads MICROS/
+    # MILLIS. Downcast every datetime column to microsecond precision before
+    # writing so Spark can read it with no special config.
+    for col in df.columns:
+        if pd.api.types.is_datetime64_any_dtype(df[col]):
+            tz = getattr(df[col].dtype, "tz", None)
+            df[col] = df[col].astype(f"datetime64[us, {tz}]" if tz is not None else "datetime64[us]")
     table = pa.Table.from_pandas(df, preserve_index=False)
     pq.write_table(table, path)
     logger.info("Wrote %d rows -> %s", len(df), path)
