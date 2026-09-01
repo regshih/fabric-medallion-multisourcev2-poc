@@ -7,9 +7,18 @@ everything, uses the GET response's ETag for optimistic concurrency
 (If-Match), and always does a server-side dry run (?dryRun=true) before
 --apply actually submits the replacement.
 
-Restricts two sensitive columns to the DefaultReader role:
+Restricts two sensitive columns from the DefaultReader role by allow-listing
+every OTHER column on the governed tables:
   - gold_lh.DimCustomer.CustomerID  (business identifier)
   - gold_lh.DimDevice.DeviceFingerprint (device fingerprint)
+
+Fabric's OneLake column-level security only supports columnEffect "Permit" --
+a "Deny" constraint (this script's original design: blanket Path:* Permit
+plus an explicit Deny on the sensitive columns) is rejected outright with
+PolicyValidationError ("Column level security only supports Permit effect"),
+confirmed live 2026-09-01, not assumed from docs. Redesigned as an allow-list:
+each governed table gets an explicit Permit naming every column except the
+sensitive one(s) -- anything not named is implicitly denied.
 
 Like Dynamic Data Masking on the Warehouse side, this cannot be proven
 enforced against this session's own identity — Admin/Member/Contributor
@@ -43,12 +52,17 @@ log = logging.getLogger("onelake_security")
 
 ROLE_FIELDS = ("name", "kind", "decisionRules", "members")
 
-# tablePath -> restricted column names. Table paths are OneLake's /Tables/<name>
-# convention; names must match the lowercase metastore casing (see the sibling
-# banking POC's CLAUDE.md re: Spark/Hive lowercasing).
-COLUMN_RESTRICTIONS: dict[str, list[str]] = {
-    "/Tables/dimcustomer": ["customerid"],
-    "/Tables/dimdevice": ["devicefingerprint"],
+# tablePath -> ALLOWED column names (everything else on the table is implicitly
+# denied). Table paths are OneLake's /Tables/<name> convention; names must
+# match the lowercase metastore casing (see the sibling banking POC's
+# CLAUDE.md re: Spark/Hive lowercasing). Full column lists per
+# nb_gold_build.py's DimCustomer/DimDevice select() + the _gold_loaded_at
+# audit column every write_gold() call adds.
+TABLE_ALLOWED_COLUMNS: dict[str, list[str]] = {
+    "/Tables/dimcustomer": ["customersk", "_gold_loaded_at"],  # excludes customerid
+    "/Tables/dimdevice": [
+        "devicesk", "deviceid", "customerid", "customersk", "os", "istrusted", "_gold_loaded_at",
+    ],  # excludes devicefingerprint
 }
 
 
@@ -71,12 +85,12 @@ def build_replacement(roles: list[dict[str, Any]], role_name: str) -> dict[str, 
             continue
         constraints = rule.setdefault("constraints", {})
         columns = constraints.setdefault("columns", [])
-        for table_path, restricted in COLUMN_RESTRICTIONS.items():
+        for table_path, allowed in TABLE_ALLOWED_COLUMNS.items():
             columns[:] = [entry for entry in columns if entry.get("tablePath") != table_path]
             columns.append({
                 "tablePath": table_path,
-                "columnNames": restricted,
-                "columnEffect": "Deny",
+                "columnNames": allowed,
+                "columnEffect": "Permit",
                 "columnAction": ["Read"],
             })
             changed += 1

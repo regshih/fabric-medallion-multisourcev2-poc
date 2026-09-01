@@ -72,14 +72,32 @@ def candidate_node_types(ws: WorkspaceClient) -> list[str]:
     return fallback[:5]
 
 
+# Pinned, not "pick newest": Databricks Runtime 16.4 auto-upgrades new Unity Catalog managed
+# tables to the catalogManaged (coordinated commits) table feature by default -- confirmed
+# live via SHOW TBLPROPERTIES (databricks.internal.autoUpgrades.delta.feature.catalogManaged).
+# Fabric's mirrored-Databricks-catalog OneLake shortcuts cannot read catalogManaged tables:
+# they expose only the storage path, not a live connection back to Unity Catalog's commit
+# coordinator, so Spark on the Fabric side fails with "Couldn't locate commit coordinator"
+# even on a Fabric runtime whose Delta version otherwise understands the feature flag.
+# Empirically confirmed (test table + SHOW TBLPROPERTIES) that 15.4 LTS does not have this
+# auto-upgrade default. Pinned rather than "pick newest" so a future Databricks Runtime
+# release doesn't silently reintroduce this incompatibility.
+PINNED_SPARK_VERSION_PREFIX = "15.4."
+
+
 def pick_spark_version(ws: WorkspaceClient) -> str:
     versions = ws.clusters.spark_versions().versions
-    # Prefer the newest non-ML, non-GPU LTS-style version.
     candidates = [v.key for v in versions if v.key and "scala2.12" in v.key and "ml" not in v.key.lower() and "photon" not in v.key.lower()]
-    candidates.sort(reverse=True)
-    if not candidates:
-        raise RuntimeError("Could not find a suitable Databricks Runtime version.")
-    return candidates[0]
+    pinned = [c for c in candidates if c.startswith(PINNED_SPARK_VERSION_PREFIX)]
+    if not pinned:
+        raise RuntimeError(
+            f"Pinned Databricks Runtime {PINNED_SPARK_VERSION_PREFIX!r} is no longer offered "
+            f"by this workspace. Available: {sorted(candidates, reverse=True)}. Re-verify "
+            f"whether a newer LTS still avoids the catalogManaged auto-upgrade (see comment "
+            f"above) before updating this pin."
+        )
+    pinned.sort(reverse=True)
+    return pinned[0]
 
 
 def import_notebook(ws: WorkspaceClient, local_path: Path, workspace_path: str) -> None:

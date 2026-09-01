@@ -72,13 +72,13 @@ if source not in ("databricks", "cosmos"):
 # the mirror's own auto-generated SQL analytics endpoint (refreshMetadata returns a per-table
 # 400 BadRequest). See docs/databricks-fabric-integration.md "Consumption blocker" for the
 # full trace and the human-only fix (recreate the Fabric connection with an OAuth2/
-# Organizational-account or Service Principal credential instead of Key -- both attempted and
-# confirmed to need real interactive auth this session cannot complete).
+# Resolved 2026-09-01: both mirror connections fixed via human interactive OAuth2 sign-in --
+# see docs/databricks-fabric-integration.md / docs/cosmos-fabric-mirroring.md for the full
+# traces (exact row-count matches to source confirmed for both).
 #
-# DATABRICKS_SHORTCUT_TABLES is the CORRECT, documented consumption pattern (Lakehouse
-# OneLake shortcuts already created in silver_lh) and needs no further code change once a
-# human fixes the connection's credential type.
-DATABRICKS_MIRROR_ITEM_NAME = "BLOCKED_databricks_mirror_key_credential_see_docs"
+# DATABRICKS_MIRROR_ITEM_NAME is only used as a BLOCKED_-prefix guard flag; the actual read
+# path is DATABRICKS_SHORTCUT_TABLES (Lakehouse OneLake shortcuts already created in silver_lh).
+DATABRICKS_MIRROR_ITEM_NAME = "fmv2poc_databricks_banking_mirror"
 DATABRICKS_SHORTCUT_TABLES = {
     "transactions": "src_databricks_transactions",
     "transaction_risk_scores": "src_databricks_transaction_risk_scores",
@@ -86,16 +86,11 @@ DATABRICKS_SHORTCUT_TABLES = {
 }
 
 # --- Cosmos DB (per ARCHITECTURE.md) ---
-# Still blocked as of 2026-09-01 -- see docs/cosmos-fabric-mirroring.md "What's not done,
-# and exactly why" and infra/fabric/mirror_cosmos.py's docstring. The gateway is deployed
-# and all Cosmos-side networking prerequisites (RBAC role, Network ACL Bypass, NAT gateway)
-# are done and verified, but the Cosmos DB v2 connection through the gateway requires a
-# one-time interactive OAuth sign-in in the Fabric portal (confirmed live: the REST API
-# rejects OAuth2 credentials for VirtualNetworkGateway connections outright). Deliberately
-# BLOCKED-prefixed, not PLACEHOLDER-prefixed, so validate_cosmos() below fails with a clear,
-# specific message instead of a generic Spark AnalysisException.
-COSMOS_MIRROR_ITEM_NAME = "BLOCKED_no_cosmos_mirror_see_docs"
+COSMOS_MIRROR_ITEM_NAME = "fmv2poc_cosmos_multisource_mirror"
+COSMOS_MIRROR_ITEM_ID = "0a4ace01-7f5b-4c83-b9f4-6e267d167a7d"
+COSMOS_MIRROR_SCHEMA = "multisource"
 COSMOS_TABLES = ["digitalSessions", "devices", "fraudAlerts"]
+WORKSPACE_ID = "7e206237-aef1-4932-9f94-1f6ae343407a"
 
 
 def _count(fq_name: str) -> int:
@@ -103,6 +98,19 @@ def _count(fq_name: str) -> int:
         return spark.table(fq_name).count()
     except AnalysisException as exc:
         raise RuntimeError(f"Could not query {fq_name}. Original error: {exc}") from exc
+
+
+def _count_cosmos_table(table: str) -> int:
+    # Read via the direct OneLake ABFSS path, not spark.table(): Fabric's
+    # spark_catalog rejects multi-part namespaces for a cross-item reference
+    # ("REQUIRES_SINGLE_PART_NAMESPACE" -- confirmed live), so a MirroredDatabase
+    # item's schema-qualified tables aren't addressable through spark_catalog SQL
+    # name resolution at all. The ABFSS path bypasses catalog resolution entirely.
+    path = f"abfss://{WORKSPACE_ID}@onelake.dfs.fabric.microsoft.com/{COSMOS_MIRROR_ITEM_ID}/Tables/{COSMOS_MIRROR_SCHEMA}/{table}"
+    try:
+        return spark.read.format("delta").load(path).count()
+    except AnalysisException as exc:
+        raise RuntimeError(f"Could not query mirrored Cosmos table at {path}. Original error: {exc}") from exc
 
 
 def validate_databricks() -> dict[str, int]:
@@ -143,10 +151,9 @@ def validate_cosmos() -> dict[str, int]:
         )
     counts = {}
     for table in COSMOS_TABLES:
-        fq = f"`{COSMOS_MIRROR_ITEM_NAME}`.`{table}`"
-        n = _count(fq)
+        n = _count_cosmos_table(table)
         if n == 0:
-            raise RuntimeError(f"Cosmos mirrored table {fq} is queryable but has zero rows")
+            raise RuntimeError(f"Cosmos mirrored table {table} is queryable but has zero rows")
         counts[table] = n
     return counts
 
@@ -166,6 +173,11 @@ print(f"source_validation[{source}]: {counts} (total {rows_read} rows)")
 
 import notebookutils  # noqa: E402
 
+# useRootDefaultLakehouse=True: this notebook is attached to silver_lh but
+# pipeline_log is attached to gold_lh -- without this, notebookutils.notebook.run
+# raises "Cannot reference a Notebook that attaching to a different default
+# lakehouse" (confirmed live 2026-09-01; this call was previously unreached
+# because every earlier run raised its own guard/error before getting here).
 notebookutils.notebook.run(
     "pipeline_log",
     120,
@@ -179,6 +191,7 @@ notebookutils.notebook.run(
         "rows_written": 0,
         "error_message": "",
         "run_date": run_date,
+        "useRootDefaultLakehouse": True,
     },
 )
 

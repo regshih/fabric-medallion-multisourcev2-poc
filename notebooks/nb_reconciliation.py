@@ -61,25 +61,19 @@ _start_ts = datetime.now(timezone.utc)
 if not run_date:
     run_date = _start_ts.strftime("%Y-%m-%d")
 
-# The mirror item is healthy but NOT consumable: its Fabric connection uses a Databricks PAT
-# (credentialType "Key"), which Fabric rejects for any OneLake-shortcut-resolution-based
-# read -- confirmed live 2026-09-01 across direct paths, a Lakehouse shortcut, and the SQL
-# analytics endpoint. See docs/databricks-fabric-integration.md "Consumption blocker".
-# DATABRICKS_SHORTCUT_TABLES (already-created Lakehouse shortcuts) is the correct pattern
-# and needs no code change once a human fixes the connection's credential type. Kept in sync
-# with nb_source_validation.py / nb_silver_transform.py.
-DATABRICKS_MIRROR_ITEM_NAME = "BLOCKED_databricks_mirror_key_credential_see_docs"
+# Resolved 2026-09-01: both mirror connections fixed via human interactive OAuth2 sign-in --
+# see docs/databricks-fabric-integration.md / docs/cosmos-fabric-mirroring.md for the full
+# traces (exact row-count matches to source confirmed for both). Kept in sync with
+# nb_source_validation.py / nb_silver_transform.py.
+DATABRICKS_MIRROR_ITEM_NAME = "fmv2poc_databricks_banking_mirror"
 DATABRICKS_SHORTCUT_TABLES = {
     "transactions": "src_databricks_transactions",
     "transaction_risk_scores": "src_databricks_transaction_risk_scores",
     "merchants": "src_databricks_merchants",
 }
-# Still blocked as of 2026-09-01 -- see docs/cosmos-fabric-mirroring.md "What's not done,
-# and exactly why" and infra/fabric/mirror_cosmos.py's docstring for the one remaining
-# manual step (portal-only OAuth sign-in for the Cosmos DB v2 connection -- all networking
-# prerequisites are already done and verified). Deliberately BLOCKED-prefixed so the loop
-# below annotates its FAIL rows with why, instead of looking like a real mismatch.
-COSMOS_MIRROR_ITEM_NAME = "BLOCKED_no_cosmos_mirror_see_docs"
+COSMOS_MIRROR_ITEM_NAME = "fmv2poc_cosmos_multisource_mirror"
+COSMOS_MIRROR_ITEM_ID = "0a4ace01-7f5b-4c83-b9f4-6e267d167a7d"
+COSMOS_MIRROR_SCHEMA = "multisource"
 
 WORKSPACE_ID = "7e206237-aef1-4932-9f94-1f6ae343407a"
 SILVER_LH_ID = "6575b89d-6ea5-4273-9b7a-8c9dc67ef2c0"
@@ -90,9 +84,26 @@ def silver_table(name: str):
     return spark.read.format("delta").load(path)
 
 
-def mirror_count(fq_name: str) -> int | None:
+def mirror_count(shortcut_name: str) -> int | None:
+    # ABFSS path into silver_lh, not spark.table(): this notebook's own
+    # default lakehouse is gold_lh, and a Lakehouse OneLake shortcut living
+    # in a DIFFERENT lakehouse (silver_lh) isn't resolvable through
+    # spark_catalog from here -- confirmed live 2026-09-01 (every Databricks
+    # check came back with source_count=None / FAIL until this was fixed).
     try:
-        return spark.table(fq_name).count()
+        return silver_table(shortcut_name).count()
+    except AnalysisException:
+        return None
+
+
+def cosmos_mirror_count(table: str) -> int | None:
+    # ABFSS path, not spark.table(): Fabric's spark_catalog rejects multi-part
+    # namespaces for a cross-item reference (REQUIRES_SINGLE_PART_NAMESPACE,
+    # confirmed live), so a MirroredDatabase item's schema-qualified tables
+    # aren't addressable through spark_catalog SQL name resolution at all.
+    path = f"abfss://{WORKSPACE_ID}@onelake.dfs.fabric.microsoft.com/{COSMOS_MIRROR_ITEM_ID}/Tables/{COSMOS_MIRROR_SCHEMA}/{table}"
+    try:
+        return spark.read.format("delta").load(path).count()
     except AnalysisException:
         return None
 
@@ -146,8 +157,7 @@ COSMOS_CHECKS = [
     ("fraudAlerts", "fraud_alerts", "quarantine_fraud_alerts"),
 ]
 for mirror_table, silver_valid, silver_quarantine in COSMOS_CHECKS:
-    fq = f"`{COSMOS_MIRROR_ITEM_NAME}`.`{mirror_table}`"
-    src_count = mirror_count(fq)
+    src_count = cosmos_mirror_count(mirror_table)
     fabric_count = silver_table(silver_valid).count() + silver_table(silver_quarantine).count()
     status = "PASS" if (src_count is not None and src_count == fabric_count) else "FAIL"
     notes = (
@@ -167,7 +177,7 @@ for mirror_table, silver_valid, silver_quarantine in COSMOS_CHECKS:
 
 # 3. Silver-vs-Gold — exact match expected.
 SILVER_GOLD_CHECKS = [
-    ("merchants", "merchants"),
+    ("merchants", "dimmerchant"),
     ("devices", "dimdevice"),
     ("transactions", "facttransactions"),
     ("sessions", "factdigitalsessions"),
@@ -252,6 +262,9 @@ import notebookutils  # noqa: E402
 _status = "Succeeded" if n_fail == 0 else "Failed"
 _error_message = "" if n_fail == 0 else f"{n_fail} reconciliation check(s) FAILed — see reconciliation_results"
 
+# useRootDefaultLakehouse=True: both this notebook and pipeline_log are
+# attached to gold_lh already, but set for consistency/safety with the other
+# notebooks -- see nb_source_validation.py for the full explanation.
 notebookutils.notebook.run(
     "pipeline_log",
     120,
@@ -265,6 +278,7 @@ notebookutils.notebook.run(
         "rows_written": len(rows),
         "error_message": _error_message,
         "run_date": run_date,
+        "useRootDefaultLakehouse": True,
     },
 )
 

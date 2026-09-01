@@ -81,6 +81,9 @@ for table, n in counts.items():
 
 import notebookutils  # noqa: E402
 
+# useRootDefaultLakehouse=True: both this notebook and pipeline_log are
+# attached to gold_lh already, but set for consistency/safety with the other
+# notebooks -- see nb_source_validation.py for the full explanation.
 notebookutils.notebook.run(
     "pipeline_log",
     120,
@@ -94,6 +97,7 @@ notebookutils.notebook.run(
         "rows_written": 0,
         "error_message": "",
         "run_date": run_date,
+        "useRootDefaultLakehouse": True,
     },
 )
 

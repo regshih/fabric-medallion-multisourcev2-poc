@@ -73,31 +73,23 @@ _start_ts = datetime.now(timezone.utc)
 if not run_date:
     run_date = _start_ts.strftime("%Y-%m-%d")
 
-# The mirror item is healthy (mirrorStatus=Mirrored, syncDetails.status=Success) but NOT
-# consumable: its Fabric connection uses a Databricks PAT (credentialType "Key"), which
-# Fabric rejects for any OneLake-shortcut-resolution-based read -- confirmed live 2026-09-01
-# across three independent paths (direct mirror-path reads, a Lakehouse OneLake shortcut,
-# and the mirror's own SQL analytics endpoint, which 400s per-table on refreshMetadata). See
-# docs/databricks-fabric-integration.md "Consumption blocker" for the full trace and the
-# human-only fix. DATABRICKS_SHORTCUT_TABLES below (already-created Lakehouse shortcuts in
-# silver_lh) is the correct, documented consumption pattern and needs no code change once a
-# human fixes the connection's credential type.
-DATABRICKS_MIRROR_ITEM_NAME = "BLOCKED_databricks_mirror_key_credential_see_docs"
+# Resolved 2026-09-01: both mirror connections were fixed via human interactive OAuth2
+# sign-in (Key-type credential -> OAuth2 for Databricks; new connection created for Cosmos,
+# which has no unattended-mintable credential path at all for a VirtualNetworkGateway
+# connection). Both confirmed live via exact row-count matches to source -- see
+# docs/databricks-fabric-integration.md and docs/cosmos-fabric-mirroring.md for the full
+# traces. DATABRICKS_MIRROR_ITEM_NAME is only used as a BLOCKED_-prefix guard flag here; the
+# actual read path is DATABRICKS_SHORTCUT_TABLES (Lakehouse OneLake shortcuts in silver_lh).
+DATABRICKS_MIRROR_ITEM_NAME = "fmv2poc_databricks_banking_mirror"
 DATABRICKS_SHORTCUT_TABLES = {
     "transactions": "src_databricks_transactions",
     "transaction_risk_scores": "src_databricks_transaction_risk_scores",
     "merchants": "src_databricks_merchants",
 }
-# Still blocked as of 2026-09-01 -- see docs/cosmos-fabric-mirroring.md "What's not done,
-# and exactly why". The Fabric virtual network data gateway (infra/fabric/mirror_cosmos.py)
-# is deployed, and all Cosmos-side networking prerequisites (RBAC role, Network ACL Bypass,
-# NAT gateway) are done and verified -- but the Cosmos DB v2 connection through the gateway
-# can only be created via the Fabric portal's interactive OAuth sign-in (confirmed live: the
-# REST API flatly rejects OAuth2 credentials for VirtualNetworkGateway connections with
-# OAuth2CredentialsNotSupportedForConnection). This placeholder is deliberately
-# BLOCKED-prefixed (not PLACEHOLDER-prefixed) so a stale value fails loudly and
-# unambiguously if this notebook is ever run before the mirror exists.
-COSMOS_MIRROR_ITEM_NAME = "BLOCKED_no_cosmos_mirror_see_docs"
+COSMOS_MIRROR_ITEM_NAME = "fmv2poc_cosmos_multisource_mirror"
+COSMOS_MIRROR_ITEM_ID = "0a4ace01-7f5b-4c83-b9f4-6e267d167a7d"
+COSMOS_MIRROR_SCHEMA = "multisource"
+WORKSPACE_ID = "7e206237-aef1-4932-9f94-1f6ae343407a"
 
 
 def mirror_databricks_table(table: str):
@@ -128,15 +120,16 @@ def mirror_cosmos_table(table: str):
             "nb_source_validation.py / nb_reconciliation.py) to the real mirror item name "
             "and re-run infra/fabric/mirror_cosmos.py to finish setup."
         )
-    fq = f"`{COSMOS_MIRROR_ITEM_NAME}`.`{table}`"
+    # Read via the direct OneLake ABFSS path rather than spark.table(): Fabric's
+    # spark_catalog rejects multi-part namespaces for a cross-item reference
+    # ("REQUIRES_SINGLE_PART_NAMESPACE" -- confirmed live), so a MirroredDatabase
+    # item's schema-qualified tables aren't addressable through spark_catalog SQL
+    # name resolution at all. The ABFSS path bypasses catalog resolution entirely.
+    path = f"abfss://{WORKSPACE_ID}@onelake.dfs.fabric.microsoft.com/{COSMOS_MIRROR_ITEM_ID}/Tables/{COSMOS_MIRROR_SCHEMA}/{table}"
     try:
-        return spark.table(fq)
+        return spark.read.format("delta").load(path)
     except AnalysisException as exc:
-        raise RuntimeError(
-            f"Could not read mirrored Cosmos table {fq}. Fill in "
-            f"COSMOS_MIRROR_ITEM_NAME with the real mirror item name once "
-            f"it exists. Original error: {exc}"
-        ) from exc
+        raise RuntimeError(f"Could not read mirrored Cosmos table at {path}. Original error: {exc}") from exc
 
 
 def cast_if_present(df, col_name: str, spark_type: str):
@@ -235,15 +228,23 @@ is_valid_session = F.col("customerId").isNotNull() & F.col("sessionId").isNotNul
 sessions_valid_raw, sessions_quarantine = quarantine_split(sessions_raw, is_valid_session, "silver_quality_rule_violation")
 
 sessions_flat = (
-    sessions_valid_raw.withColumn("device_deviceType", F.get_json_object(F.col("device"), "$.deviceType"))
-    .withColumn("device_os", F.get_json_object(F.col("device"), "$.os"))
-    .withColumn("device_browser", F.get_json_object(F.col("device"), "$.browser"))
+    # Real generator schema (generators/generate_cosmos_data.py _generate_sessions,
+    # confirmed live 2026-09-01 via a real pipeline run failure -- the original
+    # extraction paths below were speculative, written before the Cosmos
+    # generator was finalized, and didn't match): device has
+    # {deviceId, deviceType, operatingSystem, appVersion} -- no "os"/"browser".
+    # geo has {country, state, city} -- no "ipAddress" (that's the top-level
+    # ipAddress field, already a plain column, no extraction needed).
+    # authentication has {method, mfaUsed, failedAttempts} -- no "success".
+    sessions_valid_raw.withColumn("device_deviceId", F.get_json_object(F.col("device"), "$.deviceId"))
+    .withColumn("device_deviceType", F.get_json_object(F.col("device"), "$.deviceType"))
+    .withColumn("device_operatingSystem", F.get_json_object(F.col("device"), "$.operatingSystem"))
     .withColumn("geo_country", F.get_json_object(F.col("geo"), "$.country"))
+    .withColumn("geo_state", F.get_json_object(F.col("geo"), "$.state"))
     .withColumn("geo_city", F.get_json_object(F.col("geo"), "$.city"))
-    .withColumn("geo_ipAddress", F.get_json_object(F.col("geo"), "$.ipAddress"))
     .withColumn("auth_method", F.get_json_object(F.col("authentication"), "$.method"))
     .withColumn("auth_mfaUsed", F.get_json_object(F.col("authentication"), "$.mfaUsed").cast("boolean"))
-    .withColumn("auth_success", F.get_json_object(F.col("authentication"), "$.success").cast("boolean"))
+    .withColumn("auth_failedAttempts", F.get_json_object(F.col("authentication"), "$.failedAttempts").cast("int"))
     .drop("device", "geo", "authentication")
     # activities[] is left as-is (already a JSON string per the Cosmos
     # mirror's generic nested-array handling) — arrays don't flatten to a
@@ -274,15 +275,19 @@ print(f"devices: {counts['devices_out']} valid, {counts['quarantine_devices']} q
 # CELL ********************
 
 # fraud_alerts (Cosmos, container fraudAlerts) — non-null alertId/
-# customerId; severity in {Low,Medium,High,Critical}.
+# customerId; severity in {low,medium,high,critical}. Real generator schema
+# (generators/generate_cosmos_data.py _generate_alerts, confirmed live
+# 2026-09-01): the timestamp field is createdTimestamp, not alertTimestamp,
+# and severity values are lowercase, not PascalCase -- the original
+# PascalCase isin() check would have silently quarantined every real row.
 fraud_alerts_raw = mirror_cosmos_table("fraudAlerts")
-fraud_alerts_raw = cast_if_present(fraud_alerts_raw, "alertTimestamp", "timestamp")
+fraud_alerts_raw = cast_if_present(fraud_alerts_raw, "createdTimestamp", "timestamp")
 counts["fraud_alerts_in"] = fraud_alerts_raw.count()
 
 is_valid_alert = (
     F.col("alertId").isNotNull()
     & F.col("customerId").isNotNull()
-    & F.col("severity").isin("Low", "Medium", "High", "Critical")
+    & F.col("severity").isin("low", "medium", "high", "critical")
 )
 fraud_valid, fraud_quarantine = quarantine_split(fraud_alerts_raw, is_valid_alert, "silver_quality_rule_violation")
 write_silver(fraud_valid, "fraud_alerts")
@@ -305,6 +310,9 @@ import notebookutils  # noqa: E402
 rows_read = sum(v for k, v in counts.items() if k.endswith("_in"))
 rows_written = sum(v for k, v in counts.items() if k.endswith("_out"))
 
+# useRootDefaultLakehouse=True: this notebook is attached to silver_lh but
+# pipeline_log is attached to gold_lh -- see nb_source_validation.py for the
+# full explanation of this requirement.
 notebookutils.notebook.run(
     "pipeline_log",
     180,
@@ -318,6 +326,7 @@ notebookutils.notebook.run(
         "rows_written": rows_written,
         "error_message": "",
         "run_date": run_date,
+        "useRootDefaultLakehouse": True,
     },
 )
 

@@ -49,7 +49,7 @@ run_date = ""
 from datetime import datetime, timedelta, timezone
 
 from pyspark.sql import functions as F
-from pyspark.sql.types import ArrayType, BooleanType, StringType, StructField, StructType
+from pyspark.sql.types import ArrayType, StringType, StructField, StructType
 
 _start_ts = datetime.now(timezone.utc)
 if not run_date:
@@ -156,10 +156,9 @@ dim_device = (
         F.col("deviceId").alias("DeviceID"),
         F.col("customerId").alias("CustomerID"),
         "CustomerSK",
-        F.col("deviceType").alias("DeviceType"),
-        F.col("os").alias("OS"),
+        F.col("operatingSystem").alias("OS"),
         F.col("deviceFingerprint").alias("DeviceFingerprint"),
-        F.col("isTrusted").alias("IsTrusted"),
+        F.col("trusted").alias("IsTrusted"),
     )
 )
 write_gold(dim_device, "DimDevice")
@@ -180,7 +179,8 @@ fact_transactions = (
     .withColumn("MerchantSK", sk("t.MerchantID"))
     .withColumn("DateKey", F.date_format(F.col("t.TransactionTimestamp"), "yyyyMMdd").cast("int"))
     .select(
-        "TransactionID", "CustomerSK", "AccountSK", "MerchantSK", "DateKey",
+        "TransactionID", "CustomerSK", F.col("t.CustomerID").alias("CustomerID"),
+        "AccountSK", "MerchantSK", "DateKey",
         F.col("t.TransactionTimestamp").alias("TransactionTimestamp"),
         F.col("t.Amount").alias("Amount"), F.col("t.Currency").alias("Currency"),
         F.col("t.TransactionType").alias("TransactionType"), F.col("t.Channel").alias("Channel"),
@@ -194,24 +194,28 @@ gold_counts["FactTransactions"] = fact_transactions.count()
 
 # CELL ********************
 
-# FactDigitalSessions — flattened columns from Silver's sessions table
-# carry the device_/geo_/auth_ prefixes nb_silver_transform.py produced.
+# FactDigitalSessions — flattened columns from Silver's sessions table carry
+# the device_/geo_/auth_ prefixes nb_silver_transform.py produced. deviceId
+# lives inside the nested device object (device_deviceId), not as a
+# top-level session column; ipAddress is top-level, not nested under geo
+# (real generator schema, confirmed live 2026-09-01 -- see
+# nb_silver_transform.py's comment on the sessions_flat block for the trace).
 fact_sessions = (
     sessions_silver
     .withColumn("CustomerSK", sk("customerId"))
-    .withColumn("DeviceSK", sk("deviceId"))
+    .withColumn("DeviceSK", sk("device_deviceId"))
     .withColumn("DateKey", F.date_format(F.col("loginTimestamp"), "yyyyMMdd").cast("int"))
     .select(
         F.col("sessionId").alias("SessionID"), "CustomerSK",
-        F.col("customerId").alias("CustomerID"), F.col("deviceId").alias("DeviceID"), "DeviceSK",
+        F.col("customerId").alias("CustomerID"), F.col("device_deviceId").alias("DeviceID"), "DeviceSK",
         "DateKey", F.col("loginTimestamp").alias("LoginTimestamp"),
         F.col("logoutTimestamp").alias("LogoutTimestamp"),
-        F.col("device_deviceType").alias("DeviceType"), F.col("device_os").alias("DeviceOS"),
-        F.col("device_browser").alias("DeviceBrowser"),
-        F.col("geo_country").alias("GeoCountry"), F.col("geo_city").alias("GeoCity"),
-        F.col("geo_ipAddress").alias("GeoIpAddress"),
+        F.col("device_deviceType").alias("DeviceType"), F.col("device_operatingSystem").alias("DeviceOS"),
+        F.col("geo_country").alias("GeoCountry"), F.col("geo_state").alias("GeoState"),
+        F.col("geo_city").alias("GeoCity"),
+        F.col("ipAddress").alias("GeoIpAddress"),
         F.col("auth_method").alias("AuthMethod"), F.col("auth_mfaUsed").alias("AuthMfaUsed"),
-        F.col("auth_success").alias("AuthSuccess"),
+        F.col("auth_failedAttempts").alias("AuthFailedAttempts"),
         F.col("activities").alias("ActivitiesJson"),
     )
 )
@@ -224,14 +228,16 @@ gold_counts["FactDigitalSessions"] = fact_sessions.count()
 # specific transaction); when present it's the join key
 # nb_gold_consumption_demo.py uses to prove the fraud-to-transaction
 # cross-source query.
+# Real generator schema has createdTimestamp, not alertTimestamp (confirmed
+# live 2026-09-01 -- see nb_silver_transform.py's fraud_alerts cell comment).
 fact_fraud_alerts = (
     fraud_alerts_silver
     .withColumn("CustomerSK", sk("customerId"))
-    .withColumn("DateKey", F.date_format(F.col("alertTimestamp"), "yyyyMMdd").cast("int"))
+    .withColumn("DateKey", F.date_format(F.col("createdTimestamp"), "yyyyMMdd").cast("int"))
     .select(
         F.col("alertId").alias("AlertID"), "CustomerSK", F.col("customerId").alias("CustomerID"),
         F.col("transactionId").alias("TransactionID"), "DateKey",
-        F.col("alertTimestamp").alias("AlertTimestamp"), F.col("severity").alias("Severity"),
+        F.col("createdTimestamp").alias("AlertTimestamp"), F.col("severity").alias("Severity"),
         F.col("alertType").alias("AlertType"),
     )
 )
@@ -289,7 +295,11 @@ txn_agg = txn_windowed.groupBy("CustomerID").agg(
 fraud_agg = fraud_windowed.groupBy("CustomerID").agg(F.count("*").alias("FraudAlertCount"))
 
 login_agg = session_windowed.groupBy("CustomerID").agg(
-    F.sum(F.when(F.col("AuthSuccess") == False, 1).otherwise(0)).alias("FailedLoginCount"),  # noqa: E712
+    # Real generator schema has no per-session success/fail flag -- every
+    # session document represents a completed login, with AuthFailedAttempts
+    # recording how many attempts failed before it succeeded. FailedLoginCount
+    # counts sessions that had at least one such failed attempt.
+    F.sum(F.when(F.col("AuthFailedAttempts") > 0, 1).otherwise(0)).alias("FailedLoginCount"),
     F.countDistinct("DeviceID").alias("DistinctDeviceCount"),
 )
 
@@ -301,30 +311,41 @@ untrusted_agg = (
     .agg(F.countDistinct("DeviceID").alias("UntrustedDeviceCount"))
 )
 
-# GeographicAnomalyCount — parses devices_silver.geoHistory[] (kept as a
-# JSON string per ARCHITECTURE.md's Silver section) for devices actually
-# used in a session within the window. Assumed entry shape: {country, city,
-# observedAt, isAnomaly} — see the ASSUMED COSMOS DOCUMENT SHAPE note in
-# nb_silver_transform.py; this is the corresponding Gold-side assumption.
+# GeographicAnomalyCount — the original design assumed each geoHistory[]
+# entry carried its own isAnomaly flag; the real generator schema
+# (generators/generate_cosmos_data.py _generate_devices, confirmed live
+# 2026-09-01) has no such field -- entries are just {country, state, city,
+# timestamp}, a plain travel history with no anomaly marker. Redefined using
+# data that actually exists: a session is a geographic anomaly when it
+# happens in a country the device's own geoHistory has never recorded --
+# i.e. the device was used somewhere outside its known travel history.
+# Devices with no geoHistory at all (~1/6, by design -- brand-new or never
+# left home) can't be evaluated this way and are excluded, not counted as
+# anomalous by default.
 GEO_HISTORY_SCHEMA = ArrayType(StructType([
     StructField("country", StringType()),
+    StructField("state", StringType()),
     StructField("city", StringType()),
-    StructField("observedAt", StringType()),
-    StructField("isAnomaly", BooleanType()),
+    StructField("timestamp", StringType()),
 ]))
 
-devices_in_window = session_windowed.select("CustomerID", "DeviceID").distinct()
-geo_anomaly_agg = (
-    devices_in_window
-    .join(devices_silver.select(F.col("deviceId").alias("DeviceID"), F.col("geoHistory")), "DeviceID", "inner")
-    .withColumn("geo_entry", F.explode(F.from_json(F.col("geoHistory"), GEO_HISTORY_SCHEMA)))
-    .where(
-        F.col("geo_entry.isAnomaly")
-        & (F.to_date("geo_entry.observedAt") >= F.lit(session_window_start))
-        & (F.to_date("geo_entry.observedAt") <= F.lit(session_as_of))
+device_home_countries = (
+    devices_silver
+    .where(F.col("geoHistory").isNotNull())
+    .select(
+        F.col("deviceId").alias("DeviceID"),
+        F.explode(F.from_json(F.col("geoHistory"), GEO_HISTORY_SCHEMA)).alias("geo_entry"),
     )
+    .groupBy("DeviceID")
+    .agg(F.collect_set(F.col("geo_entry.country")).alias("HomeCountries"))
+)
+
+geo_anomaly_agg = (
+    session_windowed.select("CustomerID", "DeviceID", "GeoCountry").distinct()
+    .join(device_home_countries, "DeviceID", "inner")
+    .where(~F.array_contains(F.col("HomeCountries"), F.col("GeoCountry")))
     .groupBy("CustomerID")
-    .agg(F.count("*").alias("GeographicAnomalyCount"))
+    .agg(F.countDistinct("DeviceID", "GeoCountry").alias("GeographicAnomalyCount"))
 )
 
 risk_profile = (
@@ -395,6 +416,9 @@ rows_read = (
 )
 rows_written = sum(gold_counts.values())
 
+# useRootDefaultLakehouse=True: both this notebook and pipeline_log are
+# attached to gold_lh already, but set for consistency/safety with the other
+# notebooks -- see nb_source_validation.py for the full explanation.
 notebookutils.notebook.run(
     "pipeline_log",
     180,
@@ -408,6 +432,7 @@ notebookutils.notebook.run(
         "rows_written": rows_written,
         "error_message": "",
         "run_date": run_date,
+        "useRootDefaultLakehouse": True,
     },
 )
 

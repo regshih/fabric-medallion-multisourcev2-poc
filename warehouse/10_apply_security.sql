@@ -54,7 +54,7 @@ FROM dbo._base_DimCustomer;
 GO
 
 CREATE OR ALTER VIEW dbo.DimDevice AS
-SELECT DeviceSK, DeviceID, CustomerID, CustomerSK, DeviceType, OS, DeviceFingerprint, IsTrusted,
+SELECT DeviceSK, DeviceID, CustomerID, CustomerSK, OS, DeviceFingerprint, IsTrusted,
        _gold_loaded_at
 FROM dbo._base_DimDevice;
 GO

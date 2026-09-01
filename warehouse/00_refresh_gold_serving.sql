@@ -63,8 +63,8 @@ GO
 
 CREATE OR ALTER VIEW dbo.FactDigitalSessions AS
 SELECT SessionID, CustomerSK, CustomerID, DeviceID, DeviceSK, DateKey, LoginTimestamp,
-       LogoutTimestamp, DeviceType, DeviceOS, DeviceBrowser, GeoCountry, GeoCity, GeoIpAddress,
-       AuthMethod, AuthMfaUsed, AuthSuccess, ActivitiesJson, _gold_loaded_at
+       LogoutTimestamp, DeviceType, DeviceOS, GeoCountry, GeoState, GeoCity, GeoIpAddress,
+       AuthMethod, AuthMfaUsed, AuthFailedAttempts, ActivitiesJson, _gold_loaded_at
 FROM gold_lh.dbo.factdigitalsessions;
 GO
 
