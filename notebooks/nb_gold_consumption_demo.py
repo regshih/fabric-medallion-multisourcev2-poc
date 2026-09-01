@@ -8,9 +8,9 @@
 # META   },
 # META   "dependencies": {
 # META     "lakehouse": {
-# META       "default_lakehouse": "00000000-0000-0000-0000-000000000000",
+# META       "default_lakehouse": "2b598e5c-9cff-497e-b43b-7a5d1b91c0df",
 # META       "default_lakehouse_name": "gold_lh",
-# META       "default_lakehouse_workspace_id": "00000000-0000-0000-0000-000000000000"
+# META       "default_lakehouse_workspace_id": "7e206237-aef1-4932-9f94-1f6ae343407a"
 # META     }
 # META   }
 # META }
@@ -27,8 +27,8 @@ from datetime import datetime, timezone
 
 from pyspark.sql import functions as F
 
-WORKSPACE_ID = "00000000-0000-0000-0000-000000000000"  # TODO fill in
-SILVER_LH_ID = "00000000-0000-0000-0000-000000000000"  # TODO fill in
+WORKSPACE_ID = "7e206237-aef1-4932-9f94-1f6ae343407a"
+SILVER_LH_ID = "6575b89d-6ea5-4273-9b7a-8c9dc67ef2c0"
 
 _run_at = datetime.now(timezone.utc)
 
