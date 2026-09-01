@@ -15,14 +15,13 @@ Usage:
     python infra/databricks/upload_to_workspace.py \\
         --workspace-host https://adb-XXXXXXXXXXXXXXXX.XX.azuredatabricks.net \\
         --workspace-resource-id /subscriptions/.../workspaces/dbw-fmv2poc-915d \\
-        --catalog multisourcev2poc --schema banking --volume landing \\
+        --catalog dbw_fmv2poc_915d --schema banking --volume landing \\
         --source-dir ./data/databricks
 """
 
 from __future__ import annotations
 
 import argparse
-import io
 import json
 import logging
 import sys
