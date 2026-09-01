@@ -1,6 +1,7 @@
 azure-identity
 azure-mgmt-databricks
 azure-cosmos
+aiohttp
 requests
 pandas
 numpy
