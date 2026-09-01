@@ -177,40 +177,43 @@ Precise status, each verified live rather than assumed:
   interactive registration step; this is a cloud resource Fabric provisions directly into
   the given subnet. `infra/fabric/mirror_cosmos.py` re-checks and reuses this gateway
   idempotently.
-- **Step 7 (the Azure Cosmos DB v2 connection through the gateway) is BLOCKED, and this is
-  now a confirmed product gap, not an inference from documentation.** POSTing
+- **Step 7 (the Azure Cosmos DB v2 connection through the gateway) — resolved 2026-09-01.**
+  It was a confirmed product gap, not an inference from documentation: POSTing
   `https://api.fabric.microsoft.com/v1/connections` with `connectivityType:
   "VirtualNetworkGateway"`, `gatewayId` set to the gateway above, `connectionDetails.type:
   "CosmosDB"`, and `credentialDetails.credentials: {"credentialType": "OAuth2",
-  "UseCallerIdentity": true}` returns:
+  "UseCallerIdentity": true}` returned a hard, immediate rejection:
   ```
   400 OAuth2CredentialsNotSupportedForConnection
   "The connectivity type 'VirtualNetworkGateway' is not supported for OAuth2 credentials."
   ```
-  This is a hard, immediate REST rejection — not an interactive-redirect error like the
-  Databricks connection hit (see `docs/databricks-fabric-integration.md`'s
-  counterpart finding in `mirror_databricks.py`'s docstring), and there is no alternative
-  `credentialType` to fall back to: the guide states private-network Cosmos mirroring
-  supports OAuth-based authentication only, and this account additionally has
-  `disableLocalAuth: true` so account-key auth is rejected at the data plane regardless. The
-  Fabric portal's **Manage connections and gateways → Connections → + New → connectivity
-  type "Virtual network" → connection type "Azure Cosmos DB v2" → Authentication method
-  "OAuth 2.0" → Edit credentials → sign in** flow is the only way to create this connection.
-  **To unblock:** a human with workspace Admin/Member access must complete that portal flow
-  once (using gateway `fmv2poc-cosmos-vnet-gateway`, endpoint
-  `https://cosmosfabricmsv2915d.documents.azure.com:443/`). Steps 3-5 are already done (see
-  above), so the connection's test-connection step should succeed on the first attempt — the
-  account's network ACLs already trust this specific gateway/workspace.
-- **Step 8 (the mirrored database item + `startMirroring`) is NOT YET ATTEMPTED**, because it
-  depends on step 7's connection existing. `infra/fabric/mirror_cosmos.py` already contains
-  this step (idempotent `MirroredDatabase` item creation via `definition`/`mirroring.json`,
-  then `startMirroring`, then polling `getMirroringStatus`) and will run it automatically the
-  next time the script is invoked, once a human has completed step 7.
+  — with no alternative `credentialType` to fall back to (the guide states private-network
+  Cosmos mirroring supports OAuth-based authentication only, and this account additionally
+  has `disableLocalAuth: true`). A human completed the Fabric portal's **Manage connections
+  and gateways → Connections → + New → connectivity type "Virtual network" → gateway
+  `fmv2poc-cosmos-vnet-gateway` → connection type "Azure Cosmos DB v2" → endpoint
+  `https://cosmosfabricmsv2915d.documents.azure.com:443/` → Authentication method
+  "OAuth 2.0" → sign in** flow, creating connection `fmv2poc-cosmos-vnet-connection`. It
+  succeeded on the first attempt, as expected — steps 3-5's network ACL trust was already in
+  place. One implementation note: `find_cosmos_vnet_connection()` in `mirror_databricks.py`'s
+  sibling `mirror_cosmos.py` originally matched any `VirtualNetworkGateway` CosmosDB
+  connection to the right host, with no way to distinguish this POC's own connection from an
+  unrelated leftover connection to the same account (`fabric-multisource-cosmos-private-oauth`,
+  bound to a different, foreign gateway, found live in this tenant) — fixed to prefer a match
+  on `gatewayId` first, since silently mirroring through the wrong gateway would have been a
+  hard-to-notice correctness bug.
+- **Step 8 (the mirrored database item + `startMirroring`) — done, verified live.**
+  `python -m infra.fabric.mirror_cosmos` created `MirroredDatabase` item
+  `fmv2poc_cosmos_multisource_mirror` and called `startMirroring`. One timing note: calling
+  `startMirroring` immediately after item creation returned
+  `400 OperationNotAllowedInCurrentStatus` ("Initializing") — the item needs a few seconds to
+  reach `Initialized` (checked via `getMirroringStatus`) before `startMirroring` will accept.
+  After that, status moved to `Running`, and a direct SQL query against the mirror's own
+  analytics endpoint confirmed an exact row-count match to source: 1,201 digitalSessions,
+  400 devices, 151 fraudAlerts.
 
-**Net effect:** steps 1-6 are fully done and verified. **The only remaining step is 7** — a
-human completes the portal-only OAuth sign-in described above — after which
-`python infra/fabric/mirror_cosmos.py` will detect the new connection and finish step 8
-(mirrored database item creation + `startMirroring`) unattended.
+**Net effect:** all 8 steps are done and verified, including a live, queryable row-count
+match to source. This mirror is fully usable now, not just item-created.
 
 **How the real data got loaded without any of that being usable yet:** since the account
 has no reachable public endpoint and no gateway exists, `cosmos/load_initial.py` and

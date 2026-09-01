@@ -83,11 +83,15 @@ python -m infra.fabric.mirror_cosmos   # see docs/cosmos-fabric-mirroring.md for
                                         # virtual-network-gateway prerequisite
 ```
 
-**If the Databricks connection was created with a Key-type credential (a Databricks PAT —
-the default unattended path in `mirror_databricks.py`)**, the mirror item will report healthy
-but its data won't actually be readable — see
-[docs/databricks-fabric-integration.md](../docs/databricks-fabric-integration.md) "Fabric
-mirror: deployed, but not consumable" and README "Human-only steps" for the fix.
+`mirror_databricks.py`'s default unattended path creates the connection with a Key-type
+credential (a Databricks PAT). The mirror item will report healthy immediately, but its data
+won't actually be readable until a human edits that connection's credentials to OAuth2 in the
+Fabric portal — see [docs/databricks-fabric-integration.md](../docs/databricks-fabric-integration.md)
+"Fabric mirror: the Key-credential blocker" for the fix and a timing note (the fix can take
+~20 minutes to propagate before reads start working). Similarly, `mirror_cosmos.py` will print
+manual portal instructions and exit if no working `VirtualNetworkGateway` Cosmos DB v2
+connection exists yet — see [docs/cosmos-fabric-mirroring.md](../docs/cosmos-fabric-mirroring.md)
+"Step 7" for the exact steps; re-run this script afterward to finish unattended.
 
 ## 5. Deploy notebooks and pipeline
 

@@ -166,17 +166,29 @@ def ensure_gateway(session, capacity_id: str, subscription_id: str, resource_gro
     return gateway["id"]
 
 
-def find_cosmos_vnet_connection(session, cosmos_host: str) -> dict | None:
+def find_cosmos_vnet_connection(session, cosmos_host: str, gateway_id: str) -> dict | None:
+    """Prefers a connection bound to our own gateway_id -- more than one
+    VirtualNetworkGateway CosmosDB connection to the same host can exist
+    (e.g. a leftover from an earlier, unrelated attempt at this POC), and
+    picking the wrong one would silently mirror through a gateway we don't
+    control or haven't verified."""
     connections = list_all(session, f"{FABRIC_API}/connections")
-    for c in connections:
-        details = c.get("connectionDetails") or {}
-        if (
-            details.get("type") == "CosmosDB"
-            and c.get("connectivityType") == "VirtualNetworkGateway"
-            and cosmos_host in (details.get("path") or "")
-        ):
-            return c
-    return None
+    candidates = [
+        c for c in connections
+        if (c.get("connectionDetails") or {}).get("type") == "CosmosDB"
+        and c.get("connectivityType") == "VirtualNetworkGateway"
+        and cosmos_host in ((c.get("connectionDetails") or {}).get("path") or "")
+    ]
+    on_our_gateway = [c for c in candidates if c.get("gatewayId") == gateway_id]
+    if on_our_gateway:
+        return on_our_gateway[0]
+    if len(candidates) > 1:
+        log.warning(
+            "%d Cosmos VNet connections found for host %r, none bound to our gateway %r -- "
+            "using the first (%r, %s). Verify this is the intended one.",
+            len(candidates), cosmos_host, gateway_id, candidates[0].get("displayName"), candidates[0]["id"],
+        )
+    return candidates[0] if candidates else None
 
 
 def ensure_mirrored_database(session, workspace_id: str, connection_id: str, cosmos_database: str) -> str:
@@ -253,7 +265,7 @@ def main() -> int:
 
     gateway_id = ensure_gateway(session, capacity["id"], subscription_id, resource_group, vnet_name, "snet-fabric")
 
-    connection = find_cosmos_vnet_connection(session, cosmos_host)
+    connection = find_cosmos_vnet_connection(session, cosmos_host, gateway_id)
     if not connection:
         message = (
             f"BLOCKED at Step 7 (manual): no VirtualNetworkGateway Azure Cosmos DB v2 connection "

@@ -189,7 +189,7 @@ later phase of this POC.
 - Managed Delta tables: `transactions`, `transaction_risk_scores`, `merchants`
 - Change Data Feed enabled on all three tables (`delta.enableChangeDataFeed = true`)
 
-## Fabric mirror: deployed, but not consumable — the Key-credential blocker
+## Fabric mirror: the Key-credential blocker (resolved 2026-09-01 — see end of section)
 
 `infra/fabric/mirror_databricks.py` created the mirror item for real
 (`fmv2poc_databricks_banking_mirror`) and it IS genuinely healthy:
@@ -248,26 +248,40 @@ could not complete either way it was attempted:**
   confirmed by attempting `az login` directly (it hung waiting for
   interactive browser/device-code input rather than completing headlessly).
 
-**To unblock** (human-only): either (a) in the Fabric portal, edit the
-`fmv2poc-databricks-catalog-mirror-connection` connection's credentials,
-choose Organizational account, and complete the interactive sign-in; or
-(b) run `az login` interactively to clear the Conditional Access challenge,
-then `az ad app create` / `az ad sp create-for-rbac` to mint a Service
-Principal, grant it `EXTERNAL USE SCHEMA` on `dbw_fmv2poc_915d.banking` (via
-`infra/databricks/grant_external_use_schema.py --principal <app-id>`), and
-update the connection's credentials to `ServicePrincipal` type. **No other
-code change is needed once either fix lands** — `nb_source_validation.py`,
-`nb_silver_transform.py`, and `nb_reconciliation.py` already reference the
-correct Lakehouse shortcut tables (`src_databricks_transactions` etc.,
-already created) and will start working the moment the connection's
-credential is fixed.
+**How it was unblocked**: a human edited the
+`fmv2poc-databricks-catalog-mirror-connection` connection's credentials in
+the Fabric portal, choosing OAuth2 (labeled "Organizational account" in this
+doc's earlier terminology) and completing the interactive sign-in. No other
+code change was needed — `nb_source_validation.py`, `nb_silver_transform.py`,
+and `nb_reconciliation.py` already referenced the correct Lakehouse shortcut
+tables (`src_databricks_transactions` etc., already created), and the
+connection is referenced by ID from the mirror item's own definition, not
+snapshotted.
+
+**One thing worth recording for anyone hitting this again: the fix did not
+take effect immediately.** The connection object updated correctly right
+away (`credentialType: "OAuth2"`, confirmed via GET `/v1/connections/{id}`),
+but reads through the shortcuts kept failing with the *exact same*
+`"authentication type 'Key'"` error for roughly 20 minutes afterward. Two
+hypotheses were ruled out live rather than just waiting it out: shortcut-level
+caching (deleted and recreated a shortcut from scratch — same error) and a
+stale reference in the mirror item's own definition (fetched it via
+`getDefinition` — it references the connection dynamically by ID, not a
+snapshot). The remaining explanation is an internal credential-resolution
+cache somewhere in Fabric's mirroring/shortcut backend with a propagation
+delay on this order. After that window, all three previously-failing access
+paths (direct mirror read, Lakehouse shortcut, SQL analytics endpoint) started
+working with no further changes.
 
 ## Deployment and verification status
 
-Deployed and executed against the real workspace: the Premium workspace,
-Unity Catalog catalog/schema/volume, the seed job (750,025 transactions /
-750,025 risk scores / 1,501 merchants, remote-validated), and the Fabric
-mirror item itself (real, healthy, `mirrorStatus: "Mirrored"`). **Not yet
-verified**, and specifically blocked as described above: actually reading
-the mirrored data from any Fabric consumption surface. This is a real,
-confirmed, human-only blocker — not a design gap in this repo's code.
+**Fully deployed, executed, and verified** against the real workspace: the
+Premium workspace, Unity Catalog catalog/schema/volume, the seed job
+(750,025 transactions / 750,025 risk scores / 1,501 merchants,
+remote-validated), and the Fabric mirror item (`mirrorStatus: "Mirrored"`).
+The mirror's data is now confirmed readable end to end: after the credential
+fix and propagation window described above, a direct SQL query against the
+mirror's own analytics endpoint returned an exact row-count match to
+source — `banking.transactions` 750,025, `banking.transaction_risk_scores`
+750,025, `banking.merchants` 1,501 — confirmed 2026-09-01, not assumed from
+item status alone.
