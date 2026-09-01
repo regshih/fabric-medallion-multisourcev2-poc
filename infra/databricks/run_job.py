@@ -10,6 +10,12 @@ than leaving them as scripts nobody ran.
 Auth: AAD via `az login`, exchanged for a Databricks token through the SDK's
 "azure-cli" auth type. No secrets are read, stored, or printed.
 
+Windows/Git Bash note: MSYS auto-converts leading-`/` CLI arguments (like
+--workspace-resource-id /subscriptions/...) into bogus Windows paths (e.g.
+C:/Program Files/Git/subscriptions/...), which Databricks then rejects as
+"Invalid resource ID". Run this from PowerShell, or set MSYS_NO_PATHCONV=1
+in Git Bash before invoking it.
+
 Usage:
     python infra/databricks/run_job.py --help
     python infra/databricks/run_job.py \\
@@ -31,6 +37,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from databricks.sdk import WorkspaceClient
+from databricks.sdk.errors import OperationFailed
 from databricks.sdk.service import compute, jobs
 from databricks.sdk.service.workspace import ImportFormat, Language
 
@@ -85,8 +92,14 @@ def import_notebook(ws: WorkspaceClient, local_path: Path, workspace_path: str) 
 
 
 def _is_capacity_failure(run: jobs.Run) -> bool:
-    msg = (run.state.state_message or "") if run.state else ""
-    return "CLOUD_PROVIDER_RESOURCE_STOCKOUT" in msg or "SkuNotAvailable" in msg or "not available in location" in msg
+    messages = [(run.state.state_message or "") if run.state else ""]
+    for task in run.tasks or []:
+        if task.state and task.state.state_message:
+            messages.append(task.state.state_message)
+    combined = " ".join(messages)
+    return any(marker in combined for marker in (
+        "CLOUD_PROVIDER_RESOURCE_STOCKOUT", "SkuNotAvailable", "not available in location",
+    ))
 
 
 def run_notebook_job(ws: WorkspaceClient, workspace_path: str, params: dict[str, str], run_name: str) -> jobs.Run:
@@ -128,7 +141,15 @@ def run_notebook_job(ws: WorkspaceClient, workspace_path: str, params: dict[str,
             ],
         )
         logger.info("Run submitted (run_id=%s). Waiting for completion (job cluster starts + runs + auto-terminates)...", waiter.run_id)
-        run = waiter.result(timeout=timedelta(minutes=30))
+        try:
+            run = waiter.result(timeout=timedelta(minutes=30))
+        except OperationFailed:
+            # The SDK's waiter raises rather than returning a Run whenever the
+            # run lands in a non-terminal-success lifecycle state (e.g.
+            # INTERNAL_ERROR from a cluster capacity stockout) — fetch the
+            # actual Run so the capacity-fallback check below has something
+            # to inspect, instead of the retry loop never triggering.
+            run = ws.jobs.get_run(run_id=waiter.run_id)
         last_run = run
 
         if run.state and run.state.result_state == jobs.RunResultState.SUCCESS:
