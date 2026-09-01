@@ -17,7 +17,7 @@ Both sources are generated independently but must join. Every generator/loader u
 |---|---|---|
 | `CustomerID` | `CUST-` + 6 digits | `CUST-000042` |
 | `AccountID` | `ACCT` + 9 digits | `ACCT000000123` |
-| `DeviceID` | `DEVICE-` + 6 digits | `DEVICE-000007` |
+| `DeviceID` | `DEV-` + 6 digits | `DEV-000007` |
 | `MerchantID` | `MER` + 6 digits | `MER000015` |
 | `TransactionID` | `TXN-` + 9 digits | `TXN-000000042` |
 
