@@ -6,8 +6,17 @@
   rejected by Fabric's connector ("Unexpected PAT detected"). Human-only step, see README.
 - Cosmos DB mirroring for a private-endpoint-only account needs a Fabric virtual network data
   gateway on a reserved subnet — a real, documented product requirement, not a workaround
-  avoided out of laziness. See [docs/cosmos-fabric-mirroring.md](cosmos-fabric-mirroring.md)
+  avoided out of laziness. All networking is done and verified; only the portal-only OAuth
+  connection sign-in remains, human-only. See [docs/cosmos-fabric-mirroring.md](cosmos-fabric-mirroring.md)
   for exactly what's built vs. what remains.
+- The Databricks mirror item is deployed and healthy but its data isn't readable from any
+  Fabric surface (Spark, Lakehouse shortcuts, or the SQL analytics endpoint) because its
+  connection uses a Databricks PAT (`credentialType: "Key"`), which Fabric doesn't support
+  for OneLake-shortcut-resolution-based reads — confirmed live across three independent
+  access paths, not inferred. Fixing this needs real interactive auth (Organizational-account
+  OAuth sign-in, or creating a Service Principal, both blocked in this automated session) —
+  human-only. See [docs/databricks-fabric-integration.md](databricks-fabric-integration.md)
+  "Fabric mirror: deployed, but not consumable" for the full trace and exact fix steps.
 - Warehouse governance SQL and the pipeline's Silver/Gold/reconciliation stages depend on
   both source mirrors being readable — sequenced after mirroring in the deployment order.
 

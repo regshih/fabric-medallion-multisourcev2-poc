@@ -61,10 +61,19 @@ _start_ts = datetime.now(timezone.utc)
 if not run_date:
     run_date = _start_ts.strftime("%Y-%m-%d")
 
-# Real Fabric display name, confirmed live 2026-09-01 by infra/fabric/mirror_databricks.py.
-# Kept in sync with nb_source_validation.py / nb_silver_transform.py.
-DATABRICKS_MIRROR_ITEM_NAME = "fmv2poc_databricks_banking_mirror"
-DATABRICKS_SCHEMA = "banking"
+# The mirror item is healthy but NOT consumable: its Fabric connection uses a Databricks PAT
+# (credentialType "Key"), which Fabric rejects for any OneLake-shortcut-resolution-based
+# read -- confirmed live 2026-09-01 across direct paths, a Lakehouse shortcut, and the SQL
+# analytics endpoint. See docs/databricks-fabric-integration.md "Consumption blocker".
+# DATABRICKS_SHORTCUT_TABLES (already-created Lakehouse shortcuts) is the correct pattern
+# and needs no code change once a human fixes the connection's credential type. Kept in sync
+# with nb_source_validation.py / nb_silver_transform.py.
+DATABRICKS_MIRROR_ITEM_NAME = "BLOCKED_databricks_mirror_key_credential_see_docs"
+DATABRICKS_SHORTCUT_TABLES = {
+    "transactions": "src_databricks_transactions",
+    "transaction_risk_scores": "src_databricks_transaction_risk_scores",
+    "merchants": "src_databricks_merchants",
+}
 # Still blocked as of 2026-09-01 -- see docs/cosmos-fabric-mirroring.md "What's not done,
 # and exactly why" and infra/fabric/mirror_cosmos.py's docstring for the one remaining
 # manual step (portal-only OAuth sign-in for the Cosmos DB v2 connection -- all networking
@@ -109,16 +118,24 @@ DATABRICKS_CHECKS = [
     ("merchants", "merchants", "quarantine_merchants"),
 ]
 for mirror_table, silver_valid, silver_quarantine in DATABRICKS_CHECKS:
-    fq = f"`{DATABRICKS_MIRROR_ITEM_NAME}`.`{DATABRICKS_SCHEMA}`.`{mirror_table}`"
-    src_count = mirror_count(fq)
     fabric_count = silver_table(silver_valid).count() + silver_table(silver_quarantine).count()
+    if DATABRICKS_MIRROR_ITEM_NAME.startswith("BLOCKED_"):
+        src_count = None
+        notes = (
+            "EXPECTED FAIL: the Databricks mirror is healthy but not consumable (Key-type "
+            "connection credential unsupported for OneLake-shortcut reads -- see "
+            "docs/databricks-fabric-integration.md 'Consumption blocker'). Not a real "
+            "reconciliation mismatch."
+        )
+    else:
+        src_count = mirror_count(DATABRICKS_SHORTCUT_TABLES[mirror_table])
+        notes = (
+            "Validates two access paths to the SAME underlying Delta data via the OneLake "
+            "shortcut, not real replication — see ARCHITECTURE.md 'Sources and Bronze'. "
+            "fabric_count = Silver valid + Silver quarantine (reconstructs the mirror's total)."
+        )
     status = "PASS" if (src_count is not None and src_count == fabric_count) else "FAIL"
-    add_row(
-        "databricks", mirror_table, src_count, fabric_count, "row_count", status,
-        "Validates two access paths to the SAME underlying Delta data via the OneLake "
-        "shortcut, not real replication — see ARCHITECTURE.md 'Sources and Bronze'. "
-        "fabric_count = Silver valid + Silver quarantine (reconstructs the mirror's total).",
-    )
+    add_row("databricks", mirror_table, src_count, fabric_count, "row_count", status, notes)
 
 # CELL ********************
 

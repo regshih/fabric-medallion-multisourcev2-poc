@@ -189,16 +189,85 @@ later phase of this POC.
 - Managed Delta tables: `transactions`, `transaction_risk_scores`, `merchants`
 - Change Data Feed enabled on all three tables (`delta.enableChangeDataFeed = true`)
 
+## Fabric mirror: deployed, but not consumable — the Key-credential blocker
+
+`infra/fabric/mirror_databricks.py` created the mirror item for real
+(`fmv2poc_databricks_banking_mirror`) and it IS genuinely healthy:
+`mirrorStatus: "Mirrored"`, `syncDetails.status: "Success"`, and its three
+expected files are confirmed present via a direct ADLS Gen2 DFS List Path
+call using an ordinary user token. **None of that means the data is actually
+usable from Fabric, and it isn't yet, for a specific, confirmed reason.**
+
+The Fabric connection backing the mirror uses a Databricks personal access
+token (`credentialType: "Key"`) — the only unattended credential option
+available (see "Why a Databricks PAT" above). Fabric explicitly does not
+support Key-type stored connections for any OneLake-shortcut-resolution-based
+read of a mirrored Databricks catalog. Confirmed live 2026-09-01 across three
+independent access paths, all failing the same way:
+
+1. **Direct mirror-path read** (`spark.read.format("delta").load(<mirror's
+   own oneLakeTablesPath>)`) — `Py4JJavaError` from the ADLS Gen2 driver.
+2. **Lakehouse OneLake shortcut** (`infra/fabric/shortcut_databricks_mirror.py`
+   — creates real, correctly-configured shortcuts in `silver_lh`, confirmed
+   via the Shortcuts API; this is the pattern Microsoft's own tutorial
+   documents as the supported way to read a mirrored Databricks catalog from
+   Spark) — reading the shortcut, either via `spark.table(...)` or a direct
+   path load on the shortcut's own location, fails with the exact same
+   underlying error, surfaced clearly by `notebookutils.fs.ls`: `"This
+   operation is not currently supported. Stored connections with
+   authentication type 'Key' are not supported for shortcuts of type
+   'Databricks...'"`.
+3. **The mirror's own auto-generated SQL analytics endpoint** (T-SQL, the
+   other documented direct-access mode alongside Power BI) — connects fine
+   (no auth rejection at the ODBC layer), but `POST
+   .../sqlEndpoints/{id}/refreshMetadata` returns a per-table `"status":
+   "Failure"`, `"errorCode": "BadRequest"` for every table, and
+   `INFORMATION_SCHEMA.TABLES` never shows the banking tables — only system
+   tables. Same root cause, different surface.
+
+**Net effect: reading this mirror's data through any Fabric-native
+mechanism — Spark, a Lakehouse shortcut, the SQL analytics endpoint, and by
+extension Power BI Direct Lake — is blocked until the connection's
+credential type changes.** The mirror item's "Mirrored"/"Success" status
+only reflects that Fabric could authenticate to Unity Catalog *metadata* and
+enumerate/track the tables; it says nothing about whether the *data path* a
+consumer would use actually works, and for a Key-credentialed connection to
+this item type, it does not.
+
+**The fix requires real interactive authentication, which this session
+could not complete either way it was attempted:**
+
+- **Organizational-account OAuth2** for the connection: `UseCallerIdentity`
+  requires a browser OAuth redirect — confirmed live, not assumed (see "Why
+  a Databricks PAT" above).
+- **Service Principal**: creating one needs `az ad app create` (Microsoft
+  Graph). This session's Azure CLI login hit `Continuous access evaluation
+  resulted in challenge with result: InteractionRequired and code:
+  TokenCreatedWithOutdatedPolicies` on every Graph write call attempted —
+  a tenant Conditional Access policy requiring a fresh interactive sign-in,
+  confirmed by attempting `az login` directly (it hung waiting for
+  interactive browser/device-code input rather than completing headlessly).
+
+**To unblock** (human-only): either (a) in the Fabric portal, edit the
+`fmv2poc-databricks-catalog-mirror-connection` connection's credentials,
+choose Organizational account, and complete the interactive sign-in; or
+(b) run `az login` interactively to clear the Conditional Access challenge,
+then `az ad app create` / `az ad sp create-for-rbac` to mint a Service
+Principal, grant it `EXTERNAL USE SCHEMA` on `dbw_fmv2poc_915d.banking` (via
+`infra/databricks/grant_external_use_schema.py --principal <app-id>`), and
+update the connection's credentials to `ServicePrincipal` type. **No other
+code change is needed once either fix lands** — `nb_source_validation.py`,
+`nb_silver_transform.py`, and `nb_reconciliation.py` already reference the
+correct Lakehouse shortcut tables (`src_databricks_transactions` etc.,
+already created) and will start working the moment the connection's
+credential is fixed.
+
 ## Deployment and verification status
 
-See the top-level task report for the authoritative planned/implemented/
-deployed/executed/verified breakdown. Summary: the Premium workspace,
-Unity Catalog catalog/schema/volume, and the seed job are deployed and were
-actually executed against the real workspace (not left as unexecuted
-scripts). The Fabric-side mirror item itself (creating the actual "Mirrored
-Azure Databricks catalog" object in a Fabric workspace) is out of scope for
-this phase per the task brief — it is called out as later work, and this
-document exists specifically so that later phase can be done correctly
-(right catalog/schema names, right auth model, right expectations about
-zero-copy vs. replication, right expectations about what security controls
-do and don't carry over).
+Deployed and executed against the real workspace: the Premium workspace,
+Unity Catalog catalog/schema/volume, the seed job (750,025 transactions /
+750,025 risk scores / 1,501 merchants, remote-validated), and the Fabric
+mirror item itself (real, healthy, `mirrorStatus: "Mirrored"`). **Not yet
+verified**, and specifically blocked as described above: actually reading
+the mirrored data from any Fabric consumption surface. This is a real,
+confirmed, human-only blocker — not a design gap in this repo's code.

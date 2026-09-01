@@ -73,11 +73,21 @@ _start_ts = datetime.now(timezone.utc)
 if not run_date:
     run_date = _start_ts.strftime("%Y-%m-%d")
 
-# Real Fabric display name, confirmed live 2026-09-01 by infra/fabric/mirror_databricks.py
-# (Partial catalog mirroring, banking schema, Full mode -- sync status Success,
-# mirrorStatus Mirrored, all three table shortcuts verified present in OneLake).
-DATABRICKS_MIRROR_ITEM_NAME = "fmv2poc_databricks_banking_mirror"
-DATABRICKS_SCHEMA = "banking"
+# The mirror item is healthy (mirrorStatus=Mirrored, syncDetails.status=Success) but NOT
+# consumable: its Fabric connection uses a Databricks PAT (credentialType "Key"), which
+# Fabric rejects for any OneLake-shortcut-resolution-based read -- confirmed live 2026-09-01
+# across three independent paths (direct mirror-path reads, a Lakehouse OneLake shortcut,
+# and the mirror's own SQL analytics endpoint, which 400s per-table on refreshMetadata). See
+# docs/databricks-fabric-integration.md "Consumption blocker" for the full trace and the
+# human-only fix. DATABRICKS_SHORTCUT_TABLES below (already-created Lakehouse shortcuts in
+# silver_lh) is the correct, documented consumption pattern and needs no code change once a
+# human fixes the connection's credential type.
+DATABRICKS_MIRROR_ITEM_NAME = "BLOCKED_databricks_mirror_key_credential_see_docs"
+DATABRICKS_SHORTCUT_TABLES = {
+    "transactions": "src_databricks_transactions",
+    "transaction_risk_scores": "src_databricks_transaction_risk_scores",
+    "merchants": "src_databricks_merchants",
+}
 # Still blocked as of 2026-09-01 -- see docs/cosmos-fabric-mirroring.md "What's not done,
 # and exactly why". The Fabric virtual network data gateway (infra/fabric/mirror_cosmos.py)
 # is deployed, and all Cosmos-side networking prerequisites (RBAC role, Network ACL Bypass,
@@ -91,15 +101,20 @@ COSMOS_MIRROR_ITEM_NAME = "BLOCKED_no_cosmos_mirror_see_docs"
 
 
 def mirror_databricks_table(table: str):
-    fq = f"`{DATABRICKS_MIRROR_ITEM_NAME}`.`{DATABRICKS_SCHEMA}`.`{table}`"
-    try:
-        return spark.table(fq)
-    except AnalysisException as exc:
+    if DATABRICKS_MIRROR_ITEM_NAME.startswith("BLOCKED_"):
         raise RuntimeError(
-            f"Could not read mirrored Databricks table {fq}. Fill in "
-            f"DATABRICKS_MIRROR_ITEM_NAME with the real mirror item name "
-            f"once it exists. Original error: {exc}"
-        ) from exc
+            "The Databricks mirror is not consumable yet -- its Fabric connection uses a "
+            "Key-type credential (a Databricks PAT), which Fabric rejects for any "
+            "OneLake-shortcut-resolution-based read. See "
+            "docs/databricks-fabric-integration.md 'Consumption blocker' for the trace and "
+            "the human-only fix (recreate the connection with OAuth2 or a Service "
+            "Principal). No code change needed here once fixed."
+        )
+    shortcut_name = DATABRICKS_SHORTCUT_TABLES[table]
+    try:
+        return spark.table(shortcut_name)
+    except AnalysisException as exc:
+        raise RuntimeError(f"Could not read Databricks shortcut table {shortcut_name}. Original error: {exc}") from exc
 
 
 def mirror_cosmos_table(table: str):

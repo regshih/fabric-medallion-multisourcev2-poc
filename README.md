@@ -33,7 +33,7 @@ As of 2026-09-01:
 | Cosmos synthetic data (sessions, devices, fraud alerts) | Executed and **verified**: 1,201 digitalSessions / 400 devices / 151 fraudAlerts live, correct partition keys, deliberate schema variation confirmed present (`validation/validate_cosmos.py`) |
 | Fabric workspace, `silver_lh`/`gold_lh`/`gold_wh` items | Deployed |
 | Fabric notebooks (7) and `pl_multisource_medallion` pipeline | Deployed to the workspace |
-| Mirrored Azure Databricks catalog (Bronze, Databricks side) | **Deployed, executed, verified**: item `fmv2poc_databricks_banking_mirror`, `mirrorStatus: "Mirrored"`, all 3 OneLake shortcuts confirmed reachable via a direct ADLS Gen2 API check |
+| Mirrored Azure Databricks catalog (Bronze, Databricks side) | Item deployed and healthy (`fmv2poc_databricks_banking_mirror`, `mirrorStatus: "Mirrored"`). **Blocked, human-only** on actually reading it: the connection uses a Databricks PAT (`credentialType: "Key"`), which Fabric rejects for OneLake-shortcut-resolution-based reads — confirmed across 3 independent paths (direct mirror read, a Lakehouse shortcut, and the mirror's own SQL analytics endpoint, which 400s on `refreshMetadata`). Needs a human to redo the connection with OAuth2 or a Service Principal credential — both require real interactive auth this session couldn't complete. See [docs/databricks-fabric-integration.md](docs/databricks-fabric-integration.md) "Fabric mirror: deployed, but not consumable." |
 | Mirrored Azure Cosmos DB database (Bronze, Cosmos side) | Networking fully done (VNet gateway + Network ACL Bypass, all 8 steps of Microsoft's private-network guide except one, all verified live). **Blocked, human-only** on step 7: Fabric's Cosmos DB v2 connection over a virtual-network gateway only supports interactive OAuth 2.0 sign-in in the Fabric portal — confirmed via a hard `400 OAuth2CredentialsNotSupportedForConnection` REST rejection, not inferred from docs. See [docs/cosmos-fabric-mirroring.md](docs/cosmos-fabric-mirroring.md) for the exact portal steps; re-run `python -m infra.fabric.mirror_cosmos` afterward to finish unattended. |
 | Pipeline execution (Silver/Gold/Warehouse/reconciliation) | Not yet executed — depends on both mirrors being readable |
 | OneLake Catalog (item descriptions, domain assignment) | **Verified**: all 13 items described, workspace assigned to the `Retail Banking Analytics` domain, confirmed discoverable via Catalog Search |
@@ -79,6 +79,17 @@ and cleanup/cost guidance.
 
 ## Human-only steps
 
+- **Databricks mirror connection credential**: the mirror item is healthy but unreadable
+  (Key-type credential unsupported for OneLake-shortcut reads — confirmed live, see
+  [docs/databricks-fabric-integration.md](docs/databricks-fabric-integration.md) "Fabric
+  mirror: deployed, but not consumable"). Either (a) in the Fabric portal, edit the
+  `fmv2poc-databricks-catalog-mirror-connection` connection's credentials to Organizational
+  account and sign in interactively, or (b) run `az login` interactively (this session's
+  Conditional Access policy blocked headless Microsoft Graph writes needed to create a
+  Service Principal), then `az ad sp create-for-rbac`, grant it `EXTERNAL USE SCHEMA` via
+  `python -m infra.databricks.grant_external_use_schema --principal <app-id> ...`, and update
+  the connection to a `ServicePrincipal` credential. No notebook code change needed either
+  way — `src_databricks_*` Lakehouse shortcuts already exist and point at the right place.
 - **GitHub PAT for Fabric Git integration**: create a fine-grained PAT scoped to just this
   repo (Contents: Read and write, short expiration) at
   https://github.com/settings/personal-access-tokens/new, set it as `GITHUB_PAT` in `.env`

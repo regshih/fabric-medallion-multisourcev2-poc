@@ -62,10 +62,28 @@ if source not in ("databricks", "cosmos"):
     raise ValueError(f"source must be 'databricks' or 'cosmos', got {source!r}")
 
 # --- Databricks (Unity Catalog, per ARCHITECTURE.md) ---
-# Real Fabric display name, confirmed live 2026-09-01 by infra/fabric/mirror_databricks.py.
-DATABRICKS_MIRROR_ITEM_NAME = "fmv2poc_databricks_banking_mirror"
-DATABRICKS_SCHEMA = "banking"
-DATABRICKS_TABLES = ["transactions", "transaction_risk_scores", "merchants"]
+# The mirror item itself is healthy (mirrorStatus=Mirrored, syncDetails.status=Success,
+# confirmed live 2026-09-01 by infra/fabric/mirror_databricks.py) but is NOT consumable from
+# any Fabric surface: its connection uses a Databricks PAT (credentialType "Key"), which
+# Fabric does not support for OneLake-shortcut-resolution-based reads. Confirmed live across
+# three independent paths, all failing the same way ("Stored connections with authentication
+# type 'Key' are not supported..."): direct mirror-path reads, a Lakehouse OneLake shortcut
+# (infra/fabric/shortcut_databricks_mirror.py -- created successfully, but unreadable), and
+# the mirror's own auto-generated SQL analytics endpoint (refreshMetadata returns a per-table
+# 400 BadRequest). See docs/databricks-fabric-integration.md "Consumption blocker" for the
+# full trace and the human-only fix (recreate the Fabric connection with an OAuth2/
+# Organizational-account or Service Principal credential instead of Key -- both attempted and
+# confirmed to need real interactive auth this session cannot complete).
+#
+# DATABRICKS_SHORTCUT_TABLES is the CORRECT, documented consumption pattern (Lakehouse
+# OneLake shortcuts already created in silver_lh) and needs no further code change once a
+# human fixes the connection's credential type.
+DATABRICKS_MIRROR_ITEM_NAME = "BLOCKED_databricks_mirror_key_credential_see_docs"
+DATABRICKS_SHORTCUT_TABLES = {
+    "transactions": "src_databricks_transactions",
+    "transaction_risk_scores": "src_databricks_transaction_risk_scores",
+    "merchants": "src_databricks_merchants",
+}
 
 # --- Cosmos DB (per ARCHITECTURE.md) ---
 # Still blocked as of 2026-09-01 -- see docs/cosmos-fabric-mirroring.md "What's not done,
@@ -84,20 +102,27 @@ def _count(fq_name: str) -> int:
     try:
         return spark.table(fq_name).count()
     except AnalysisException as exc:
-        raise RuntimeError(
-            f"Could not query {fq_name}. If the mirror item name is still the "
-            f"PLACEHOLDER_ value above, fill it in with the real Fabric display "
-            f"name once the mirror is provisioned. Original error: {exc}"
-        ) from exc
+        raise RuntimeError(f"Could not query {fq_name}. Original error: {exc}") from exc
 
 
 def validate_databricks() -> dict[str, int]:
+    if DATABRICKS_MIRROR_ITEM_NAME.startswith("BLOCKED_"):
+        raise RuntimeError(
+            "The Databricks mirror item is healthy but not consumable: its Fabric connection "
+            "uses a Databricks PAT (credentialType 'Key'), which Fabric rejects for any "
+            "OneLake-shortcut-resolution-based read (confirmed live across direct paths, a "
+            "Lakehouse shortcut, and the SQL analytics endpoint -- see "
+            "docs/databricks-fabric-integration.md 'Consumption blocker'). A human must "
+            "recreate the Fabric connection with an OAuth2/Organizational-account or Service "
+            "Principal credential (both require real interactive auth). Once fixed, this "
+            "notebook needs no code change -- DATABRICKS_SHORTCUT_TABLES already points at "
+            "the correct, working Lakehouse shortcuts."
+        )
     counts = {}
-    for table in DATABRICKS_TABLES:
-        fq = f"`{DATABRICKS_MIRROR_ITEM_NAME}`.`{DATABRICKS_SCHEMA}`.`{table}`"
-        n = _count(fq)
+    for table, shortcut_name in DATABRICKS_SHORTCUT_TABLES.items():
+        n = _count(shortcut_name)
         if n == 0:
-            raise RuntimeError(f"Databricks mirrored table {fq} is queryable but has zero rows")
+            raise RuntimeError(f"Databricks shortcut table {shortcut_name} is queryable but has zero rows")
         counts[table] = n
     return counts
 

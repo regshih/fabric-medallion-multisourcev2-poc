@@ -76,9 +76,18 @@ time, unlike a single-workspace, never-rebuilt POC.
 
 ```bash
 python -m infra.fabric.mirror_databricks
+python -m infra.fabric.shortcut_databricks_mirror   # Lakehouse shortcuts -- the actually-
+                                        # supported way to read the mirror from Spark, see
+                                        # docs/databricks-fabric-integration.md
 python -m infra.fabric.mirror_cosmos   # see docs/cosmos-fabric-mirroring.md for the
                                         # virtual-network-gateway prerequisite
 ```
+
+**If the Databricks connection was created with a Key-type credential (a Databricks PAT —
+the default unattended path in `mirror_databricks.py`)**, the mirror item will report healthy
+but its data won't actually be readable — see
+[docs/databricks-fabric-integration.md](../docs/databricks-fabric-integration.md) "Fabric
+mirror: deployed, but not consumable" and README "Human-only steps" for the fix.
 
 ## 5. Deploy notebooks and pipeline
 
