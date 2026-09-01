@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "warehouse_publish",
+    "description": "Notebook/stage: refreshes gold_wh's physical _base_* tables and governed views from gold_lh."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "3134dbc3-f631-b234-4f01-17bc11eb5a34"
+  }
+}

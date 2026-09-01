@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "MirroredAzureDatabricksCatalog",
+    "displayName": "fmv2poc_databricks_banking_mirror",
+    "description": "Mirrored Unity Catalog schema dbw_fmv2poc_915d.banking (fabric-medallion-multisourcev2-poc Bronze)."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "626135f3-c0e9-b570-4f21-6db3a5d6b243"
+  }
+}

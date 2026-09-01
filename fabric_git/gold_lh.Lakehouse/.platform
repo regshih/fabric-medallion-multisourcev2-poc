@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Lakehouse",
+    "displayName": "gold_lh",
+    "description": "Gold layer: cross-source star schema (5 dims, 3 facts) plus AggCustomerRiskProfile, the primary cross-source analytical output combining Databricks transaction/risk data with Cosmos session/device/fraud-alert data. See ARCHITECTURE.md."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "1b91c0df-7a5d-b43b-497e-9cff2b598e5c"
+  }
+}

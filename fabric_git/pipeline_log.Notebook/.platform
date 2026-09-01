@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "pipeline_log",
+    "description": "Shared logging notebook: writes stage start/end/status/row counts/errors to gold_lh.control_pipeline_run_log — invoked on both the success and failure path of every pipeline stage."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "697abc99-4815-9c1b-477d-ec023d2460ff"
+  }
+}

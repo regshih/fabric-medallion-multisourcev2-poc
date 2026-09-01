@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "reconciliation",
+    "description": "Notebook: source-vs-Fabric and Silver-vs-Gold count/quality reconciliation, writing gold_lh.reconciliation_results."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "5b4f28a1-4e4c-a415-45f5-be9e88d5f9f3"
+  }
+}

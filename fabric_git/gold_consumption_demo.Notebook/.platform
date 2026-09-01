@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "gold_consumption_demo",
+    "description": "Analyst-facing discovery notebook: inventories all layers and runs the cross-source customer risk-profile and fraud-investigation business queries. Not part of the pipeline — run interactively."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "93e0a426-f200-a9ef-4aa1-7d92969dc981"
+  }
+}

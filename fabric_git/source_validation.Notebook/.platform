@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "source_validation",
+    "description": "Notebook: confirms both mirrored sources (Databricks shortcut, Cosmos replica) exist with expected schema/row counts before Silver runs. First stage of pl_multisource_medallion."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "b2ad56ae-1937-9d77-41a6-b77ae8aec29d"
+  }
+}

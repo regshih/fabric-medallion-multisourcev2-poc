@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Lakehouse",
+    "displayName": "silver_lh",
+    "description": "Silver layer: cleansed/typed/quarantined data read directly from the mirrored Databricks Unity Catalog (shortcut) and mirrored Cosmos DB (Delta replica) sources. No physical Bronze copy exists."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "c67ef2c0-8c9d-9b7a-4273-6ea56575b89d"
+  }
+}

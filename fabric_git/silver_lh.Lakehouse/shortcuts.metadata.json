@@ -1,0 +1,41 @@
+[
+  {
+    "name": "src_databricks_transactions",
+    "path": "/Tables",
+    "target": {
+      "type": "OneLake",
+      "oneLake": {
+        "path": "Tables/banking/transactions",
+        "itemId": "626135f3-c0e9-b570-4f21-6db3a5d6b243",
+        "workspaceId": "00000000-0000-0000-0000-000000000000",
+        "artifactType": "DatabricksCatalog"
+      }
+    }
+  },
+  {
+    "name": "src_databricks_transaction_risk_scores",
+    "path": "/Tables",
+    "target": {
+      "type": "OneLake",
+      "oneLake": {
+        "path": "Tables/banking/transaction_risk_scores",
+        "itemId": "626135f3-c0e9-b570-4f21-6db3a5d6b243",
+        "workspaceId": "00000000-0000-0000-0000-000000000000",
+        "artifactType": "DatabricksCatalog"
+      }
+    }
+  },
+  {
+    "name": "src_databricks_merchants",
+    "path": "/Tables",
+    "target": {
+      "type": "OneLake",
+      "oneLake": {
+        "path": "Tables/banking/merchants",
+        "itemId": "626135f3-c0e9-b570-4f21-6db3a5d6b243",
+        "workspaceId": "00000000-0000-0000-0000-000000000000",
+        "artifactType": "DatabricksCatalog"
+      }
+    }
+  }
+]

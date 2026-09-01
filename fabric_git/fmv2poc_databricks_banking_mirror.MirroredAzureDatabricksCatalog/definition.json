@@ -1,0 +1,15 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/mirroredAzureDatabricksCatalog/definition/mirroredAzureDatabricksCatalogDefinition/1.0.0/schema.json",
+  "autoSync": "Enabled",
+  "catalogName": "dbw_fmv2poc_915d",
+  "databricksWorkspaceConnectionId": "1adfbfe5-d143-43be-acb7-38117b87a93e",
+  "mirrorConfiguration": {
+    "schemas": [
+      {
+        "mirroringMode": "Full",
+        "name": "banking"
+      }
+    ]
+  },
+  "mirroringMode": "Partial"
+}

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "gold_build",
+    "description": "Notebook: builds the gold_lh star schema and AggCustomerRiskProfile from Silver."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "0f12de11-bc0d-86b4-4ba7-39975fd71e17"
+  }
+}

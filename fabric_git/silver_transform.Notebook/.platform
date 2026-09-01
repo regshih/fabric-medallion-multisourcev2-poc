@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "silver_transform",
+    "description": "Notebook: reads both mirrored sources, applies quality rules and quarantine, writes Silver Delta tables."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "22e81938-c128-b7cc-4080-91afbc41b8f2"
+  }
+}
