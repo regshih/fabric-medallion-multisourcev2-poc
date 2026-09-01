@@ -9,7 +9,7 @@ anywhere.
 Usage:
     python infra/databricks/provision_workspace.py --help
     python infra/databricks/provision_workspace.py \\
-        --subscription-id e7dbfbc9-31f1-4b77-ae5d-0394f173915d \\
+        --subscription-id <sub-id> \\
         --resource-group rg-fabric-medallion-multisourcev2-poc-westus3 \\
         --workspace-name dbw-fmv2poc-915d --location westus3
 
