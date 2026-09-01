@@ -21,12 +21,24 @@ the default here (``--catalog`` defaults to the auto-provisioned name).
 Pass ``--managed-location`` to instead create a genuinely new catalog backed
 by an existing external location/storage credential, if one is available.
 
-All catalog/schema operations use only workspace-scoped Unity Catalog REST
-calls (no Databricks *account*-level API, and therefore no Databricks
-account_id needed) via the SDK's "azure-cli" auth type (AAD, `az login`).
-Enabling external data access on the metastore, however, is a metastore-
-admin-only operation; this script reports precisely whether the caller has
-that right and, if not, exactly what is needed to unblock it.
+Catalog/schema operations and the read-only metastore check use only
+workspace-scoped Unity Catalog REST calls, all via the SDK's "azure-cli"
+auth type (AAD, `az login`). Enabling external data access is a metastore-
+admin-only operation; the workspace-scoped API rejects it even for an
+account-admin identity (PERMISSION_DENIED), so that specific call goes
+through the Databricks *account*-level API instead
+(`AccountClient.metastores.update`), using an account_id the SDK
+auto-discovers from the workspace config (`ws.config.account_id`) — no
+manual account-console lookup needed. See check_and_maybe_enable_external_
+access() for the full explanation. This script reports precisely whether
+the caller has the needed rights and, if not, exactly what is needed to
+unblock it.
+
+Windows/Git Bash note: MSYS auto-converts leading-`/` CLI arguments (like
+--workspace-resource-id /subscriptions/...) into bogus Windows paths (e.g.
+C:/Program Files/Git/subscriptions/...), which Databricks then rejects as
+"Invalid resource ID". Run this from PowerShell, or set MSYS_NO_PATHCONV=1
+in Git Bash before invoking it.
 
 Usage:
     python infra/databricks/setup_unity_catalog.py --help

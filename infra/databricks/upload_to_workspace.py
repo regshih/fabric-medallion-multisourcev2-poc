@@ -10,6 +10,12 @@ overwriting if already present (safe to re-run after regenerating data).
 Auth: AAD via `az login`, exchanged for a Databricks token through the SDK's
 "azure-cli" auth type. No secrets are read, stored, or printed.
 
+Windows/Git Bash note: MSYS auto-converts leading-`/` CLI arguments (like
+--workspace-resource-id /subscriptions/...) into bogus Windows paths (e.g.
+C:/Program Files/Git/subscriptions/...), which Databricks then rejects as
+"Invalid resource ID". Run this from PowerShell, or set MSYS_NO_PATHCONV=1
+in Git Bash before invoking it.
+
 Usage:
     python infra/databricks/upload_to_workspace.py --help
     python infra/databricks/upload_to_workspace.py \\

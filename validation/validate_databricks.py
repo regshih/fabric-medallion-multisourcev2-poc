@@ -20,6 +20,17 @@ Two modes:
       later runs; the warehouse is explicitly stopped after each run to
       avoid idle spend.
 
+      All remote checks run as server-side aggregate SQL (COUNT/MIN/MAX/SUM
+      over the whole table), not `SELECT *` pulled into pandas: at this
+      table's scale (750k+ rows), `SELECT *` exceeds the Statement Execution
+      API's 25 MB INLINE result limit (BAD_REQUEST "Inline byte limit
+      exceeded"). Aggregates return one row regardless of table size.
+
+      Windows/Git Bash note: MSYS auto-converts leading-`/` CLI arguments
+      (like --workspace-resource-id /subscriptions/...) into bogus Windows
+      paths, which Databricks then rejects as "Invalid resource ID". Run
+      this from PowerShell, or set MSYS_NO_PATHCONV=1 in Git Bash first.
+
 Checks performed (both modes, where applicable):
   - row counts for transactions / transaction_risk_scores / merchants
   - no null business keys (TransactionID, CustomerID, AccountID, MerchantID,
@@ -152,7 +163,16 @@ def ensure_warehouse(ws, resource_id: str) -> str:
     return warehouse.id
 
 
-def fetch_df_via_sql(ws, warehouse_id: str, query: str) -> pd.DataFrame:
+def run_one_row_query(ws, warehouse_id: str, query: str) -> dict:
+    """Execute a query expected to return exactly one row and return it as a
+    dict of column name -> value (still strings; caller coerces as needed).
+    Used instead of pulling full tables into pandas: at 750k+ rows, a
+    `SELECT *` blows past the Statement Execution API's 25 MB INLINE result
+    limit (BAD_REQUEST: "Inline byte limit exceeded ... disposition=INLINE
+    can have a result size of at most 26214400 bytes"). All validation here
+    is therefore done as server-side aggregate SQL (COUNT/MIN/MAX/SUM), which
+    is also just a more sensible way to validate hundreds of thousands of
+    rows than shipping them all to the client."""
     from databricks.sdk.service.sql import StatementState
 
     resp = ws.statement_execution.execute_statement(statement=query, warehouse_id=warehouse_id, wait_timeout="50s")
@@ -163,7 +183,104 @@ def fetch_df_via_sql(ws, warehouse_id: str, query: str) -> pd.DataFrame:
         raise ValidationError(f"Query failed ({resp.status.state}): {query!r} -> {resp.status.error}")
     cols = [c.name for c in resp.manifest.schema.columns]
     rows = resp.result.data_array or []
-    return pd.DataFrame(rows, columns=cols)
+    if len(rows) != 1:
+        raise ValidationError(f"Expected exactly one row from aggregate query, got {len(rows)}: {query!r}")
+    return dict(zip(cols, rows[0]))
+
+
+def validate_remote_aggregates(ws, warehouse_id: str, catalog: str, schema: str) -> list[str]:
+    failures: list[str] = []
+    t = f"{catalog}.{schema}.transactions"
+    r = f"{catalog}.{schema}.transaction_risk_scores"
+    m = f"{catalog}.{schema}.merchants"
+
+    counts = run_one_row_query(
+        ws, warehouse_id,
+        f"SELECT (SELECT COUNT(*) FROM {t}) AS txn_count, "
+        f"(SELECT COUNT(*) FROM {r}) AS risk_count, "
+        f"(SELECT COUNT(*) FROM {m}) AS merchant_count",
+    )
+    txn_count, risk_count, merchant_count = int(counts["txn_count"]), int(counts["risk_count"]), int(counts["merchant_count"])
+    logger.info("Row counts: transactions=%d transaction_risk_scores=%d merchants=%d", txn_count, risk_count, merchant_count)
+    check(txn_count > 0, "transactions has rows", failures)
+    check(risk_count > 0, "transaction_risk_scores has rows", failures)
+    check(merchant_count > 0, "merchants has rows", failures)
+
+    txn = run_one_row_query(
+        ws, warehouse_id,
+        f"""SELECT
+            SUM(CASE WHEN TransactionID IS NULL THEN 1 ELSE 0 END) AS null_txn_id,
+            SUM(CASE WHEN CustomerID IS NULL THEN 1 ELSE 0 END) AS null_cust_id,
+            SUM(CASE WHEN AccountID IS NULL THEN 1 ELSE 0 END) AS null_acct_id,
+            SUM(CASE WHEN MerchantID IS NULL THEN 1 ELSE 0 END) AS null_merch_id,
+            SUM(CASE WHEN DeviceID IS NULL THEN 1 ELSE 0 END) AS null_device_id,
+            COUNT(*) AS total,
+            COUNT(DISTINCT TransactionID) AS distinct_txn_id,
+            SUM(CASE WHEN TransactionID NOT LIKE 'TXN-%' THEN 1 ELSE 0 END) AS bad_txn_format,
+            SUM(CASE WHEN CustomerID NOT LIKE 'CUST-%' THEN 1 ELSE 0 END) AS bad_cust_format,
+            SUM(CASE WHEN AccountID NOT LIKE 'ACCT%' THEN 1 ELSE 0 END) AS bad_acct_format,
+            SUM(CASE WHEN DeviceID NOT LIKE 'DEV-%' THEN 1 ELSE 0 END) AS bad_device_format,
+            SUM(CASE WHEN MerchantID NOT LIKE 'MER%' THEN 1 ELSE 0 END) AS bad_merch_format,
+            MIN(Amount) AS min_amount, MAX(Amount) AS max_amount,
+            SUM(CASE WHEN Amount IS NULL OR Amount <= 0 THEN 1 ELSE 0 END) AS non_positive_amount,
+            SUM(CASE WHEN Amount >= 1000000 THEN 1 ELSE 0 END) AS outlier_amount
+        FROM {t}""",
+    )
+    for key, label in (
+        ("null_txn_id", "TransactionID"), ("null_cust_id", "CustomerID"), ("null_acct_id", "AccountID"),
+        ("null_merch_id", "MerchantID"), ("null_device_id", "DeviceID"),
+    ):
+        check(int(txn[key]) == 0, f"transactions.{label} has no nulls", failures)
+    check(int(txn["distinct_txn_id"]) == int(txn["total"]), f"transactions.TransactionID is unique ({txn['distinct_txn_id']} distinct / {txn['total']} total)", failures)
+    for key, label, prefix in (
+        ("bad_txn_format", "TransactionID", "TXN-"), ("bad_cust_format", "CustomerID", "CUST-"),
+        ("bad_acct_format", "AccountID", "ACCT"), ("bad_device_format", "DeviceID", "DEV-"),
+        ("bad_merch_format", "MerchantID", "MER"),
+    ):
+        check(int(txn[key]) == 0, f"transactions.{label} follows the {prefix!r} business-key convention (violations={txn[key]})", failures)
+    check(int(txn["non_positive_amount"]) == 0, f"Amount is positive for all rows (violations={txn['non_positive_amount']})", failures)
+    check(int(txn["outlier_amount"]) == 0, f"Amount has no implausible outliers >= 1,000,000 (violations={txn['outlier_amount']})", failures)
+    logger.info("Amount range: [%s, %s]", txn["min_amount"], txn["max_amount"])
+
+    risk = run_one_row_query(
+        ws, warehouse_id,
+        f"""SELECT
+            SUM(CASE WHEN TransactionID IS NULL THEN 1 ELSE 0 END) AS null_txn_id,
+            COUNT(*) AS total,
+            COUNT(DISTINCT TransactionID) AS distinct_txn_id,
+            MIN(RiskScore) AS min_score, MAX(RiskScore) AS max_score,
+            SUM(CASE WHEN RiskScore IS NULL OR RiskScore < 0 OR RiskScore > 100 THEN 1 ELSE 0 END) AS out_of_range,
+            SUM(CASE WHEN RiskBand NOT IN ('Low', 'Medium', 'High', 'Critical') THEN 1 ELSE 0 END) AS bad_band
+        FROM {r}""",
+    )
+    check(int(risk["null_txn_id"]) == 0, "transaction_risk_scores.TransactionID has no nulls", failures)
+    check(int(risk["distinct_txn_id"]) == int(risk["total"]), f"transaction_risk_scores.TransactionID is unique ({risk['distinct_txn_id']} distinct / {risk['total']} total)", failures)
+    check(int(risk["out_of_range"]) == 0, f"RiskScore is within [0, 100] for all rows (violations={risk['out_of_range']})", failures)
+    check(int(risk["bad_band"]) == 0, f"RiskBand values are within the expected set (violations={risk['bad_band']})", failures)
+    logger.info("RiskScore range: [%s, %s]", risk["min_score"], risk["max_score"])
+
+    merch = run_one_row_query(
+        ws, warehouse_id,
+        f"""SELECT
+            SUM(CASE WHEN MerchantID IS NULL THEN 1 ELSE 0 END) AS null_id,
+            COUNT(*) AS total,
+            COUNT(DISTINCT MerchantID) AS distinct_id
+        FROM {m}""",
+    )
+    check(int(merch["null_id"]) == 0, "merchants.MerchantID has no nulls", failures)
+    check(int(merch["distinct_id"]) == int(merch["total"]), f"merchants.MerchantID is unique ({merch['distinct_id']} distinct / {merch['total']} total)", failures)
+
+    orphans = run_one_row_query(
+        ws, warehouse_id,
+        f"""SELECT
+            (SELECT COUNT(*) FROM {r} r LEFT JOIN {t} t ON r.TransactionID = t.TransactionID WHERE t.TransactionID IS NULL) AS orphan_risk,
+            (SELECT COUNT(*) FROM {t} t LEFT JOIN {m} m ON t.MerchantID = m.MerchantID WHERE m.MerchantID IS NULL) AS unknown_merchant
+        """,
+    )
+    check(int(orphans["orphan_risk"]) == 0, f"every risk score TransactionID exists in transactions (orphans={orphans['orphan_risk']})", failures)
+    check(int(orphans["unknown_merchant"]) == 0, f"every transaction MerchantID exists in merchants (unknown={orphans['unknown_merchant']})", failures)
+
+    return failures
 
 
 def run_remote(workspace_host: str, workspace_resource_id: str, catalog: str, schema: str) -> list[str]:
@@ -173,23 +290,10 @@ def run_remote(workspace_host: str, workspace_resource_id: str, catalog: str, sc
     ws = WorkspaceClient(host=workspace_host, azure_workspace_resource_id=workspace_resource_id, auth_type="azure-cli")
     warehouse_id = ensure_warehouse(ws, workspace_resource_id)
     try:
-        transactions = fetch_df_via_sql(ws, warehouse_id, f"SELECT * FROM {catalog}.{schema}.transactions")
-        risk_scores = fetch_df_via_sql(ws, warehouse_id, f"SELECT * FROM {catalog}.{schema}.transaction_risk_scores")
-        merchants = fetch_df_via_sql(ws, warehouse_id, f"SELECT * FROM {catalog}.{schema}.merchants")
+        return validate_remote_aggregates(ws, warehouse_id, catalog, schema)
     finally:
         logger.info("Stopping validation warehouse %s to avoid idle spend.", warehouse_id)
         ws.warehouses.stop(warehouse_id)
-
-    # Statement Execution API returns everything as strings; coerce the columns
-    # validate_frames() treats numerically/logically.
-    transactions["Amount"] = pd.to_numeric(transactions["Amount"], errors="coerce")
-    risk_scores["RiskScore"] = pd.to_numeric(risk_scores["RiskScore"], errors="coerce")
-
-    logger.info(
-        "Fetched from Unity Catalog: transactions=%d transaction_risk_scores=%d merchants=%d",
-        len(transactions), len(risk_scores), len(merchants),
-    )
-    return validate_frames(transactions, risk_scores, merchants)
 
 
 def parse_args() -> argparse.Namespace:
